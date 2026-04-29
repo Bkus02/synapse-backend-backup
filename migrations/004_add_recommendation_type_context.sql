@@ -1,0 +1,5 @@
+ALTER TABLE recommendations
+    ADD COLUMN IF NOT EXISTS recommendation_type TEXT NOT NULL DEFAULT 'SUGGESTION';
+
+ALTER TABLE recommendations
+    ADD COLUMN IF NOT EXISTS context TEXT NOT NULL DEFAULT 'Pending';

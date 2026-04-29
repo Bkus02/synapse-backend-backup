@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+psycopg2-binary
+pydantic-settings
+pandas
+numpy
+scikit-learn
+joblib
