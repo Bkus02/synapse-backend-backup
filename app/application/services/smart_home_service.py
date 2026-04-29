@@ -13,7 +13,10 @@ from app.api.schemas import (
     DeviceCreate,
     EnvironmentCreate,
     HabitCreate,
+    HabitUpdate,
+    LoginRequest,
     UserCreate,
+    UserUpdate,
 )
 from app.analytics.sequence_miner import SequenceMinerConfig, mine_habit_sequences
 from app.analytics.decision_engine import process_decision_sync
@@ -21,6 +24,7 @@ from app.core.models import (
     BehaviorLog,
     Device,
     Environment,
+    EnvironmentJoinRequest,
     Habit,
     Recommendation,
     RecommendationStatus,
@@ -79,12 +83,39 @@ def list_environments(session: Session) -> list[Environment]:
     return list(session.exec(select(Environment)))
 
 
+def suggest_next_environment_id(session: Session) -> str:
+    return _next_prefixed_id(session, Environment, "H")
+
+
+def list_environments_for_user(user_id: str, session: Session) -> list[Environment]:
+    member_ids = session.exec(
+        select(UserEnvironment.environment_id).where(UserEnvironment.user_id == user_id)
+    ).all()
+    return list(
+        session.exec(
+            select(Environment).where(
+                (Environment.admin_id == user_id) | (Environment.id.in_(member_ids))
+            )
+        )
+    )
+
+
 def create_environment(payload: EnvironmentCreate, session: Session) -> Environment:
     data = payload.model_dump(exclude_unset=True)
     if not data.get("id"):
         data["id"] = _next_prefixed_id(session, Environment, "H")
     env = Environment.model_validate(data)
     session.add(env)
+    session.flush()
+    if env.admin_id and env.id:
+        existing = session.exec(
+            select(UserEnvironment).where(
+                UserEnvironment.user_id == env.admin_id,
+                UserEnvironment.environment_id == env.id,
+            )
+        ).first()
+        if existing is None:
+            session.add(UserEnvironment(user_id=env.admin_id, environment_id=env.id))
     _commit_or_400(session, "Environment olusturulamadi: ID/Admin kontrol edin.")
     session.refresh(env)
     return env
@@ -123,8 +154,147 @@ def add_user_to_environment(environment_id: str, user_id: str, session: Session)
     return membership
 
 
+def _get_env_or_404(environment_id: str, session: Session) -> Environment:
+    env = session.get(Environment, environment_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail="Environment bulunamadi.")
+    return env
+
+
+def _assert_env_admin(env: Environment, admin_user_id: str) -> None:
+    if env.admin_id != admin_user_id:
+        raise HTTPException(status_code=403, detail="Bu islem icin environment admini olmalisiniz.")
+
+
+def create_join_request(
+    environment_id: str, user_id: str, session: Session
+) -> EnvironmentJoinRequest:
+    env = _get_env_or_404(environment_id, session)
+    if env.admin_id == user_id:
+        raise HTTPException(status_code=400, detail="Kullanici zaten environment admini.")
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User bulunamadi.")
+    existing = session.exec(
+        select(UserEnvironment).where(
+            UserEnvironment.user_id == user_id,
+            UserEnvironment.environment_id == environment_id,
+        )
+    ).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Kullanici zaten bu environment icinde.")
+    req = EnvironmentJoinRequest(environment_id=environment_id, user_id=user_id)
+    session.add(req)
+    _commit_or_400(session, "Join request olusturulamadi.")
+    session.refresh(req)
+    return req
+
+
+def list_join_requests(
+    environment_id: str, admin_user_id: str, session: Session
+) -> list[EnvironmentJoinRequest]:
+    env = _get_env_or_404(environment_id, session)
+    _assert_env_admin(env, admin_user_id)
+    return list(
+        session.exec(
+            select(EnvironmentJoinRequest).where(
+                EnvironmentJoinRequest.environment_id == environment_id
+            )
+        )
+    )
+
+
+def approve_join_request(
+    environment_id: str,
+    request_id: int,
+    admin_user_id: str,
+    session: Session,
+) -> UserEnvironment:
+    env = _get_env_or_404(environment_id, session)
+    _assert_env_admin(env, admin_user_id)
+    req = session.get(EnvironmentJoinRequest, request_id)
+    if req is None or req.environment_id != environment_id:
+        raise HTTPException(status_code=404, detail="Join request bulunamadi.")
+    existing = session.exec(
+        select(UserEnvironment).where(
+            UserEnvironment.user_id == req.user_id,
+            UserEnvironment.environment_id == environment_id,
+        )
+    ).first()
+    if existing is not None:
+        session.delete(req)
+        _commit_or_400(session, "Join request temizlenemedi.")
+        return existing
+    membership = UserEnvironment(user_id=req.user_id, environment_id=environment_id)
+    session.add(membership)
+    session.delete(req)
+    _commit_or_400(session, "Membership olusturulamadi.")
+    session.refresh(membership)
+    return membership
+
+
+def reject_join_request(
+    environment_id: str,
+    request_id: int,
+    admin_user_id: str,
+    session: Session,
+) -> dict[str, str]:
+    env = _get_env_or_404(environment_id, session)
+    _assert_env_admin(env, admin_user_id)
+    req = session.get(EnvironmentJoinRequest, request_id)
+    if req is None or req.environment_id != environment_id:
+        raise HTTPException(status_code=404, detail="Join request bulunamadi.")
+    session.delete(req)
+    _commit_or_400(session, "Join request silinemedi.")
+    return {"message": "Join request reddedildi."}
+
+
+def list_environment_members(
+    environment_id: str, session: Session
+) -> list[dict[str, str | None]]:
+    _get_env_or_404(environment_id, session)
+    user_ids = session.exec(
+        select(UserEnvironment.user_id).where(
+            UserEnvironment.environment_id == environment_id
+        )
+    ).all()
+    members: list[dict[str, str | None]] = []
+    for user_id in user_ids:
+        user = session.get(User, user_id)
+        if user is not None:
+            members.append(
+                {
+                    "user_id": user.id,
+                    "full_name": user.full_name,
+                    "avatar_key": user.avatar_key,
+                }
+            )
+    return members
+
+
+def _require_environment_access(user_id: str, environment_id: str, session: Session) -> None:
+    env = _get_env_or_404(environment_id, session)
+    if env.admin_id == user_id:
+        return
+    link = session.exec(
+        select(UserEnvironment).where(
+            UserEnvironment.user_id == user_id,
+            UserEnvironment.environment_id == environment_id,
+        )
+    ).first()
+    if link is None:
+        raise HTTPException(status_code=403, detail="Bu environment icin yetkiniz yok.")
+
+
 def list_devices(session: Session) -> list[Device]:
     return list(session.exec(select(Device)))
+
+
+def list_devices_for_environment(
+    environment_id: str, user_id: str, session: Session
+) -> list[Device]:
+    _require_environment_access(user_id, environment_id, session)
+    return list(session.exec(select(Device).where(Device.environment_id == environment_id)))
 
 
 def create_device(payload: DeviceCreate, session: Session) -> Device:
@@ -135,6 +305,13 @@ def create_device(payload: DeviceCreate, session: Session) -> Device:
     return device
 
 
+def create_device_authenticated(
+    payload: DeviceCreate, user_id: str, session: Session
+) -> Device:
+    _require_environment_access(user_id, payload.environment_id, session)
+    return create_device(payload, session)
+
+
 def delete_device(device_id: int, session: Session) -> dict[str, str]:
     device = session.get(Device, device_id)
     if device is None:
@@ -142,6 +319,14 @@ def delete_device(device_id: int, session: Session) -> dict[str, str]:
     session.delete(device)
     _commit_or_400(session, "Device silinemedi.")
     return {"message": "Device silindi."}
+
+
+def delete_device_authenticated(device_id: int, user_id: str, session: Session) -> dict[str, str]:
+    device = session.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device bulunamadi.")
+    _require_environment_access(user_id, device.environment_id, session)
+    return delete_device(device_id, session)
 
 
 def list_behavior_logs(session: Session) -> list[BehaviorLog]:
@@ -225,10 +410,28 @@ def list_habits(session: Session) -> list[Habit]:
     return list(session.exec(select(Habit)))
 
 
+def list_habits_for_user(user_id: str, session: Session) -> list[Habit]:
+    return list(session.exec(select(Habit).where(Habit.user_id == user_id)))
+
+
 def create_habit(payload: HabitCreate, session: Session) -> Habit:
     habit = Habit.model_validate(payload.model_dump(exclude_unset=True))
     session.add(habit)
     _commit_or_400(session, "Habit olusturulamadi: FK veya olasilik degerini kontrol edin.")
+    session.refresh(habit)
+    return habit
+
+
+def patch_habit(habit_id: int, user_id: str, payload: HabitUpdate, session: Session) -> Habit:
+    habit = session.get(Habit, habit_id)
+    if habit is None:
+        raise HTTPException(status_code=404, detail="Habit bulunamadi.")
+    if habit.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Sadece kendi habit kaydinizi guncelleyebilirsiniz.")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(habit, key, value)
+    session.add(habit)
+    _commit_or_400(session, "Habit guncellenemedi.")
     session.refresh(habit)
     return habit
 
@@ -242,8 +445,24 @@ def delete_habit(habit_id: int, session: Session) -> dict[str, str]:
     return {"message": "Habit silindi."}
 
 
+def delete_habit_authenticated(habit_id: int, user_id: str, session: Session) -> dict[str, str]:
+    habit = session.get(Habit, habit_id)
+    if habit is None:
+        raise HTTPException(status_code=404, detail="Habit bulunamadi.")
+    if habit.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Sadece kendi habit kaydinizi silebilirsiniz.")
+    return delete_habit(habit_id, session)
+
+
 def list_users(session: Session) -> list[User]:
     return list(session.exec(select(User)))
+
+
+def login_user(payload: LoginRequest, session: Session) -> User:
+    user = session.exec(select(User).where(User.email == payload.email)).first()
+    if user is None or (user.password_hash or "") != payload.password:
+        raise HTTPException(status_code=401, detail="Email veya parola hatali.")
+    return user
 
 
 def create_user(payload: UserCreate, session: Session) -> User:
@@ -253,6 +472,18 @@ def create_user(payload: UserCreate, session: Session) -> User:
     user = User.model_validate(data)
     session.add(user)
     _commit_or_400(session, "Kullanici olusturulamadi: ID veya email cakismasi olabilir.")
+    session.refresh(user)
+    return user
+
+
+def update_user(user_id: str, payload: UserUpdate, session: Session) -> User:
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User bulunamadi.")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(user, key, value)
+    session.add(user)
+    _commit_or_400(session, "User guncellenemedi: email cakismasi olabilir.")
     session.refresh(user)
     return user
 

@@ -16,13 +16,13 @@ ENUM ve trigger'lar PostgreSQL tarafında; `create_type=False`.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
 from pydantic import field_validator
-from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Interval, Numeric, Text, false
+from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Interval, Numeric, Text, UniqueConstraint, false
 from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlmodel import Field, SQLModel
 
@@ -142,6 +142,11 @@ class User(SQLModel, table=True):
         sa_column=Column(Text),
         description="Konum / iklim bağlamı.",
     )
+    avatar_key: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="Preset profile avatar key.",
+    )
 
     @field_validator("id")
     @classmethod
@@ -179,6 +184,11 @@ class Environment(SQLModel, table=True):
         default=None,
         sa_column=Column(Text),
         description="Konum metni (DB şemasında).",
+    )
+    icon_key: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="Environment icon key.",
     )
 
     @field_validator("id")
@@ -227,6 +237,11 @@ class Device(SQLModel, table=True):
         default=None,
         sa_column=Column(Text),
         description="Örn. Salon Lambası.",
+    )
+    room: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="Room or zone label.",
     )
 
 
@@ -317,6 +332,23 @@ class UserEnvironment(SQLModel, table=True):
     user_id: str = Field(max_length=8, foreign_key="users.id", primary_key=True)
     environment_id: str = Field(
         max_length=8, foreign_key="environments.id", primary_key=True
+    )
+
+
+class EnvironmentJoinRequest(SQLModel, table=True):
+    """Onay bekleyen environment katılma isteği."""
+
+    __tablename__ = "environment_join_requests"
+    __table_args__ = (
+        UniqueConstraint("environment_id", "user_id", name="uq_env_join_user"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    environment_id: str = Field(max_length=8, foreign_key="environments.id")
+    user_id: str = Field(max_length=8, foreign_key="users.id")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
 

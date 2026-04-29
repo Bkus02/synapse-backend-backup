@@ -17,15 +17,59 @@ class UserCreate(SQLModel):
     location: str | None = None
 
 
+class LoginRequest(SQLModel):
+    email: str
+    password: str
+
+
+class UserUpdate(SQLModel):
+    full_name: str | None = None
+    email: str | None = None
+    password_hash: str | None = None
+    height: int | None = None
+    weight: int | None = None
+    age: int | None = None
+    location: str | None = None
+    avatar_key: str | None = None
+
+
 class EnvironmentCreate(SQLModel):
     id: str | None = None
     name: str | None = None
     admin_id: str | None = None
     location: str | None = None
+    icon_key: str | None = None
 
 
 class AddUserToEnvironmentRequest(SQLModel):
     user_id: str
+
+
+class JoinEnvironmentRequest(SQLModel):
+    user_id: str
+
+
+class AdminUserBody(SQLModel):
+    admin_user_id: str
+
+
+class SuggestedEnvironmentId(SQLModel):
+    id: str
+
+
+class EnvironmentMemberOut(SQLModel):
+    user_id: str
+    full_name: str | None = None
+    avatar_key: str | None = None
+
+
+class JoinRequestOut(SQLModel):
+    id: int
+    environment_id: str
+    user_id: str
+    requester_name: str | None = None
+    requester_avatar_key: str | None = None
+    created_at: datetime | None = None
 
 
 class DeviceCreate(SQLModel):
@@ -34,6 +78,7 @@ class DeviceCreate(SQLModel):
     status: bool = False
     current_value: Decimal | None = None
     name: str | None = None
+    room: str | None = None
 
 
 class BehaviorLogCreate(SQLModel):
@@ -51,6 +96,14 @@ class HabitCreate(SQLModel):
     probability_score: Decimal
     is_active: bool = False
     recurrence_type: HabitRecurrence
+    device_id: int | None = None
+
+
+class HabitUpdate(SQLModel):
+    name: str | None = None
+    is_active: bool | None = None
+    recurrence_type: HabitRecurrence | None = None
+    probability_score: Decimal | None = None
     device_id: int | None = None
 
 

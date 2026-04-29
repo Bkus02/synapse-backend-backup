@@ -3,10 +3,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
 from sqlmodel import Session
 
+from app.api.routes.auth import router as auth_router
 from app.api.routes.behavior_logs import router as behavior_logs_router
 from app.api.routes.devices import router as devices_router
 from app.api.routes.environments import router as environments_router
@@ -52,6 +54,14 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Synapse Backend", lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/", response_class=PlainTextResponse)
 def root() -> str:
@@ -73,6 +83,7 @@ def readyz() -> str:
 # Hexagonal yaklaşım:
 # - inbound adapter: app/api/routes/*
 # - application service: app/application/services/*
+app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(environments_router)
 app.include_router(devices_router)
