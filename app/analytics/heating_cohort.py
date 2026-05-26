@@ -20,18 +20,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from app.analytics.preprocess import (
     GOOGLE_FORMS_CONFIG,
     GOOGLE_FORMS_DEFAULT_EXPORT_URL,
     preprocess_survey,
-    read_survey_csv,
     run_preprocess_from_url,
 )
 from app.analytics.random_forest_train import predict_rf_row, train_random_forest_classifier
-
 
 # Anket sütunu (Google Form)
 WINTER_HEATING_COL = (

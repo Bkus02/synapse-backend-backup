@@ -23,9 +23,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 from app.analytics.preprocess import (
+    DEFAULT_CONFIG,
     GOOGLE_FORMS_CONFIG,
     GOOGLE_FORMS_DEFAULT_EXPORT_URL,
-    DEFAULT_CONFIG,
     preprocess_survey,
     read_survey_csv,
     run_preprocess_from_url,
@@ -135,7 +135,7 @@ def predict_rf_row(
     idx = clf.predict(X).ravel()[0]
     label = str(le.inverse_transform([idx])[0])
     probs = clf.predict_proba(X)[0]
-    dist = {str(c): float(p) for c, p in zip(le.classes_, probs)}
+    dist = {str(c): float(p) for c, p in zip(le.classes_, probs, strict=False)}
     return label, dist
 
 

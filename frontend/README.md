@@ -1,16 +1,83 @@
-# frontend
+# Synapse Mobile (Flutter)
 
-A new Flutter project.
+Synapse backend ile konuşan Flutter istemcisi. Welcome → Login/Register →
+Dashboard (Main / Environments / Habits) akışı.
 
-## Getting Started
+## Önkoşullar
 
-This project is a starting point for a Flutter application.
+- Flutter SDK **3.10+** (Dart 3.10+)
+- Backend `http://127.0.0.1:8000` veya LAN IP'sinden erişilebilir
+  (bkz. depo kökündeki [README](../README.md)).
 
-A few resources to get you started if this is your first Flutter project:
+## Hızlı başlangıç
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+```bash
+cd frontend
+flutter pub get
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+# Windows / macOS / iOS simülatör (varsayılan 127.0.0.1:8000)
+flutter run
+
+# Web (Chrome sorunluysa) — örn. port 5050
+flutter run -d web-server --web-port 5050
+# Tarayıcı: http://localhost:5050
+
+# Android emulator (otomatik 10.0.2.2 kullanır)
+flutter run -d emulator-5554
+
+# Fiziksel cihaz — backend'in LAN IP'sini ver
+flutter run --dart-define=API_HOST=192.168.1.10
+```
+
+## Yapılandırma
+
+`lib/config/api_config.dart` üzerinden çalışır:
+
+```dart
+ApiConfig.baseUrl
+```
+
+- `--dart-define=API_HOST=<host>` verilirse `http://<host>:8000` kullanılır.
+- Web: `http://127.0.0.1:8000`
+- Android emulator: `http://10.0.2.2:8000`
+- Diğer platformlar: `http://127.0.0.1:8000`
+
+## Dizin yapısı
+
+```
+lib/
+  config/           # API_HOST çözümleyici
+  models/           # Veri sınıfları (Environment, Habit, JoinRequest, …)
+  screens/          # welcome / login / register / dashboard / environments / habits
+  services/         # SessionService, *_api.dart (HTTP istemciler)
+  utils/            # environment_visuals (ikon eşleme vb.)
+  widgets/          # NotificationsModal, ProfileModal, StreakGeneWidget
+```
+
+## Lint / analiz
+
+```bash
+flutter analyze
+```
+
+Ana lint kuralları `analysis_options.yaml` üzerinden alınır.
+
+## Auth durumu (Sprint F)
+
+- Tüm `*_api.dart` istemcileri `SessionService.authHeaders()` ile
+  `Authorization: Bearer <jwt>` gönderir.
+- Backend route'ları (devices, habits, environments, behavior-logs,
+  recommendations) artık `user_id` query parametresi yerine token'dan
+  kullanıcıyı okur. Eski parametre gönderilebilir ama token sub'ı ile
+  eşleşmek zorundadır.
+- Dashboard streak'i `GET /users/{id}/daily-activity` üzerinden gerçek
+  davranış loglarından beslenir; "Active Advices" listesi de kullanıcının
+  `/habits` listesinden `is_active=true` olanlardan oluşur.
+
+## Bilinen sınırlar
+
+- Auth token tabanlı değildir (Sprint B'de eklenecek).
+- `dashboard_screen.dart` içindeki `env-demo-01` placeholder seçili
+  environment ile değiştirilecek (Sprint F).
+- Recommendation polling akışı şu an manuel; otomatik refresh Sprint F
+  kapsamında planlanıyor.

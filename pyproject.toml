@@ -1,0 +1,23 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+extend-exclude = [
+    "frontend",
+    "data",
+    "migrations",
+    "venv",
+    ".venv",
+    "tests/chapter6_report_tables.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "E501",  # line length is handled by formatter
+    "B008",  # FastAPI Depends() in defaults is intentional
+    "B023",  # pandas/lambda loop-variable captures are intentional in analytics
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B", "E402"]
+"app/api/routes/*" = ["B008"]

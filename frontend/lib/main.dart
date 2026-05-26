@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'services/selected_environment_service.dart';
 import 'services/session_service.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/login_screen.dart';
@@ -8,6 +9,7 @@ import 'screens/dashboard_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SessionService.instance.loadFromPrefs();
+  await SelectedEnvironmentService.instance.ensureLoaded();
   runApp(const SynapseApp());
 }
 

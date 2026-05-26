@@ -6,6 +6,7 @@ import '../config/api_config.dart';
 import '../models/environment_member.dart';
 import '../models/environment_summary.dart';
 import '../models/join_request.dart';
+import 'session_service.dart';
 import 'user_api.dart';
 
 class EnvironmentApi {
@@ -13,7 +14,7 @@ class EnvironmentApi {
 
   static Future<String> suggestEnvironmentId() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/environments/suggest-id');
-    final response = await http.get(uri, headers: _jsonHeaders);
+    final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       final map = jsonDecode(response.body) as Map<String, dynamic>;
       return map['id'] as String;
@@ -25,7 +26,7 @@ class EnvironmentApi {
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}/environments/for-user/$userId',
     );
-    final response = await http.get(uri, headers: _jsonHeaders);
+    final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       final list = jsonDecode(response.body) as List<dynamic>;
       return list
@@ -50,7 +51,7 @@ class EnvironmentApi {
       'admin_id': adminId,
       'icon_key': iconKey,
     });
-    final response = await http.post(uri, headers: _jsonHeaders, body: body);
+    final response = await http.post(uri, headers: _headers, body: body);
     if (response.statusCode == 200) {
       return EnvironmentSummary.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>,
@@ -66,7 +67,7 @@ class EnvironmentApi {
     final uri =
         Uri.parse('${ApiConfig.baseUrl}/environments/$environmentId/join-requests');
     final body = jsonEncode(<String, dynamic>{'user_id': userId});
-    final response = await http.post(uri, headers: _jsonHeaders, body: body);
+    final response = await http.post(uri, headers: _headers, body: body);
     if (response.statusCode == 200) {
       return;
     }
@@ -79,8 +80,8 @@ class EnvironmentApi {
   }) async {
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}/environments/$environmentId/join-requests',
-    ).replace(queryParameters: {'admin_user_id': adminUserId});
-    final response = await http.get(uri, headers: _jsonHeaders);
+    );
+    final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       final list = jsonDecode(response.body) as List<dynamic>;
       return list
@@ -102,7 +103,7 @@ class EnvironmentApi {
       '${ApiConfig.baseUrl}/environments/$environmentId/join-requests/$requestId/approve',
     );
     final body = jsonEncode(<String, dynamic>{'admin_user_id': adminUserId});
-    final response = await http.post(uri, headers: _jsonHeaders, body: body);
+    final response = await http.post(uri, headers: _headers, body: body);
     if (response.statusCode == 200) {
       return;
     }
@@ -118,7 +119,7 @@ class EnvironmentApi {
       '${ApiConfig.baseUrl}/environments/$environmentId/join-requests/$requestId/reject',
     );
     final body = jsonEncode(<String, dynamic>{'admin_user_id': adminUserId});
-    final response = await http.post(uri, headers: _jsonHeaders, body: body);
+    final response = await http.post(uri, headers: _headers, body: body);
     if (response.statusCode == 200) {
       return;
     }
@@ -129,7 +130,7 @@ class EnvironmentApi {
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}/environments/$environmentId/members',
     );
-    final response = await http.get(uri, headers: _jsonHeaders);
+    final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       final list = jsonDecode(response.body) as List<dynamic>;
       return list
@@ -139,8 +140,6 @@ class EnvironmentApi {
     throw UserApiException('Could not load members (${response.statusCode})');
   }
 
-  static const Map<String, String> _jsonHeaders = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  };
+  static Map<String, String> get _headers =>
+      SessionService.instance.authHeaders();
 }

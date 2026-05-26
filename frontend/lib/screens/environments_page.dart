@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/environment_summary.dart';
 import '../services/environment_api.dart';
+import '../services/selected_environment_service.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
 import '../utils/environment_visuals.dart';
@@ -266,7 +267,10 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                       environment: env,
                       accent: _accent,
                       card: _card,
-                      onTap: () {
+                      onTap: () async {
+                        await SelectedEnvironmentService.instance
+                            .setSelected(env.id);
+                        if (!context.mounted) return;
                         Navigator.of(context).push<void>(
                           MaterialPageRoute<void>(
                             builder: (_) => EnvironmentDevicesPage(

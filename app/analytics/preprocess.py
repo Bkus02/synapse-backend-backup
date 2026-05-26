@@ -14,17 +14,18 @@ from __future__ import annotations
 import argparse
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
-from typing import IO, Iterable
+from typing import IO
 from urllib.error import URLError
 from urllib.request import urlopen
 
 import numpy as np
 import pandas as pd
-from app.analytics.time_utils import apply_cyclic_time_encoding
 
+from app.analytics.time_utils import apply_cyclic_time_encoding
 
 # ---------------------------------------------------------------------------
 # Yapılandırma — anket CSV başlıklarınızla eşleştirin
@@ -217,7 +218,7 @@ def drop_junk_sheet_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def read_survey_csv(source: str | Path | IO[str], encoding: str = "utf-8-sig") -> pd.DataFrame:
     """Yerel dosya, URL veya metin akışından CSV okur."""
-    if isinstance(source, (str, Path)):
+    if isinstance(source, str | Path):
         s = str(source)
         if s.startswith("http://") or s.startswith("https://"):
             try:
@@ -265,7 +266,7 @@ def parse_time_to_decimal_hours(value: object) -> float:
     """
     if pd.isna(value) or value is None or str(value).strip() == "":
         return np.nan
-    if isinstance(value, (int, float, np.floating)) and not isinstance(value, bool):
+    if isinstance(value, int | float | np.floating) and not isinstance(value, bool):
         return float(value)
     s = str(value).strip().lower().replace(".", ":")
     # Tek sayı "22" gibi

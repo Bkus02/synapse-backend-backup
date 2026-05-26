@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from pathlib import Path
@@ -13,6 +12,7 @@ from sqlmodel import Session, select
 from app.analytics.cold_start_engine import EngineConfig, run_cold_start_engine
 from app.analytics.sequence_miner import mine_habit_sequences
 from app.analytics.time_utils import encode_time_cyclic
+from app.core.settings import settings
 from app.models.habit_matrix import HabitMatrix
 
 logger = logging.getLogger(__name__)
@@ -31,9 +31,9 @@ class DecisionEngineConfig:
     mature_sequence_min_logs: int = 10
     mature_seq_weight: float = 0.80
     mature_cold_weight: float = 0.20
-    sunrise_hour: int = int(os.getenv("SUNRISE_HOUR", "6"))
-    sunset_hour: int = int(os.getenv("SUNSET_HOUR", "19"))
-    pre_sunset_light_penalty: float = float(os.getenv("PRE_SUNSET_LIGHT_PENALTY", "0.65"))
+    sunrise_hour: int = settings.sunrise_hour
+    sunset_hour: int = settings.sunset_hour
+    pre_sunset_light_penalty: float = settings.pre_sunset_light_penalty
 
 
 def _normalize_token(value: object) -> str:
@@ -276,6 +276,22 @@ def _process_decision_impl(
             "mature_sequence_mode": mature,
         },
     }
+
+
+def resolve_sequence_candidates(
+    trigger_event: dict[str, Any],
+    session: Session | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Habit Engine adaylarini cozer: oncelikle Habit Matrix (session), yoksa canli sequence mining.
+    Benchmark ve testler icin public yuzey.
+    """
+    trigger_token = _build_trigger_token(trigger_event)
+    if not trigger_token:
+        return []
+    now_hms = _parse_now_hms(trigger_event)
+    _, context = _time_period_from_cyclic(now_hms)
+    return _sequence_candidates(trigger_token, context, trigger_event, session)
 
 
 def process_decision_sync(

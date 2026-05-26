@@ -82,11 +82,14 @@ class _LoginPageState extends State<LoginPage> {
     FocusScope.of(context).unfocus();
 
     try {
-      final user = await UserApi.login(
+      final result = await UserApi.login(
         email: _emailCtrl.text.trim(),
         password: _passwordCtrl.text,
       );
-      await SessionService.instance.setUser(user);
+      await SessionService.instance.setSession(
+        user: result.user,
+        accessToken: result.accessToken,
+      );
       if (!mounted) return;
       Navigator.of(context).pushReplacementNamed('/dashboard');
     } on UserApiException catch (e) {

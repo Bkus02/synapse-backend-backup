@@ -1,36 +1,69 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
-from sqlalchemy import text
-from sqlmodel import Session
+from sqlmodel import Session, SQLModel
 
-from app.application.services import smart_home_service
+# `SQLModel.metadata` doluluğu için tüm model modüllerini import et.
+import app.core.models  # noqa: F401
+import app.models.habit_matrix  # noqa: F401
 from app.analytics.synthetic_behavior_generator import (
     export_synthetic_csv,
     generate_synthetic_behavior_logs,
     insert_synthetic_into_db,
 )
+from app.application.services import smart_home_service
+from app.core.logging_config import configure_logging
 from app.db.database import engine
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 
 def apply_sql_migrations(migrations_dir: str | Path = "migrations") -> list[str]:
+    """Migration dosyalarını alfabetik sırada uygular.
+
+    Dosya içeriği `psycopg2` raw cursor ile çalıştırılır; bu sayede
+    `DO $$ … $$` PL/pgSQL bloklarındaki dolar ayraçları korunur ve
+    birden fazla deyim tek `execute` çağrısında geçer.
+    """
     mig_path = Path(migrations_dir)
     if not mig_path.is_dir():
         raise FileNotFoundError(f"Migration klasoru bulunamadi: {mig_path}")
 
     files = sorted(mig_path.glob("*.sql"))
     applied: list[str] = []
-    with Session(engine) as session:
+    raw = engine.raw_connection()
+    try:
         for file in files:
             sql_text = file.read_text(encoding="utf-8")
             if not sql_text.strip():
                 continue
-            session.exec(text(sql_text))
-            session.commit()
+            with raw.cursor() as cur:
+                cur.execute(sql_text)
+            raw.commit()
+            logger.info("migration uygulandi: %s", file.name)
             applied.append(file.name)
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        raw.close()
     return applied
+
+
+def bootstrap_db() -> dict[str, int]:
+    """SQLModel metadata'sından tüm tabloları (yoksa) oluşturur.
+
+    SQLite/testte veya hızlı dev ortamında migration sırası yerine
+    tek satırla şemayı kurmaya yarar. PG'de migration tercih edilmelidir.
+    """
+    SQLModel.metadata.create_all(engine)
+    tables = list(SQLModel.metadata.tables.keys())
+    logger.info("bootstrap-db tamamlandi: %s tablo", len(tables))
+    return {"tables_created_or_existing": len(tables)}
 
 
 def rebuild_habit_matrix() -> dict[str, int]:
@@ -44,6 +77,11 @@ def _cli() -> argparse.ArgumentParser:
 
     m = sub.add_parser("apply-migrations", help="migrations/*.sql dosyalarini sirayla uygula")
     m.add_argument("--dir", default="migrations", help="Migration klasoru")
+
+    sub.add_parser(
+        "bootstrap-db",
+        help="SQLModel metadata'sindan tablolari olustur (dev/test fallback)",
+    )
 
     sub.add_parser("rebuild-habit-matrix", help="HabitMatrix tablosunu bastan olustur")
 
@@ -64,6 +102,12 @@ def main() -> None:
         print("Uygulanan migrationlar:")
         for name in applied:
             print(f"- {name}")
+        return
+    if args.cmd == "bootstrap-db":
+        out = bootstrap_db()
+        print(
+            f"bootstrap-db: {out['tables_created_or_existing']} tablo metadata'da."
+        )
         return
     if args.cmd == "rebuild-habit-matrix":
         out = rebuild_habit_matrix()

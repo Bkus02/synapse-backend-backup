@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -8,6 +9,8 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, select
 
+from app.analytics.decision_engine import process_decision_sync
+from app.analytics.sequence_miner import SequenceMinerConfig, mine_habit_sequences
 from app.api.schemas import (
     BehaviorLogCreate,
     DeviceCreate,
@@ -18,8 +21,9 @@ from app.api.schemas import (
     UserCreate,
     UserUpdate,
 )
-from app.analytics.sequence_miner import SequenceMinerConfig, mine_habit_sequences
-from app.analytics.decision_engine import process_decision_sync
+from app.application.services.cold_start_provisioning import provision_cold_start_defaults
+from app.core.domain.anomaly_detection import evaluate_duration_anomaly
+from app.core.domain.events import AnomalyDetected
 from app.core.models import (
     BehaviorLog,
     Device,
@@ -31,7 +35,16 @@ from app.core.models import (
     User,
     UserEnvironment,
 )
+from app.core.ports.event_publisher import EventPublisher
+from app.core.security import (
+    hash_password,
+    looks_like_bcrypt_hash,
+    verify_password,
+)
+from app.core.settings import settings
 from app.models.habit_matrix import HabitMatrix
+
+logger = logging.getLogger(__name__)
 
 
 def _commit_or_400(session: Session, message: str) -> None:
@@ -286,6 +299,16 @@ def _require_environment_access(user_id: str, environment_id: str, session: Sess
         raise HTTPException(status_code=403, detail="Bu environment icin yetkiniz yok.")
 
 
+def require_environment_access(user_id: str, environment_id: str, session: Session) -> None:
+    """Public alias for route-level authorization checks."""
+    _require_environment_access(user_id, environment_id, session)
+
+
+def require_environment_admin(user_id: str, environment_id: str, session: Session) -> None:
+    env = _get_env_or_404(environment_id, session)
+    _assert_env_admin(env, user_id)
+
+
 def list_devices(session: Session) -> list[Device]:
     return list(session.exec(select(Device)))
 
@@ -331,6 +354,57 @@ def delete_device_authenticated(device_id: int, user_id: str, session: Session) 
 
 def list_behavior_logs(session: Session) -> list[BehaviorLog]:
     return list(session.exec(select(BehaviorLog)))
+
+
+def get_daily_activity(
+    user_id: str,
+    session: Session,
+    *,
+    days: int = 10,
+) -> dict[str, Any]:
+    """Return last `days` days of activity (BehaviorLog presence) for a user.
+
+    A day counts as `active` if the user has at least one BehaviorLog whose
+    `event_time` falls on that calendar day (UTC). The most recent day is at
+    the end of the list (chronological order) — matches the dashboard streak
+    visualisation.
+    """
+    days = max(1, min(days, 60))
+    now = datetime.now(UTC)
+    today = now.date()
+    start_day = today - timedelta(days=days - 1)
+    cutoff = datetime(start_day.year, start_day.month, start_day.day, tzinfo=UTC)
+
+    logs = list(
+        session.exec(
+            select(BehaviorLog).where(
+                BehaviorLog.user_id == user_id,
+                BehaviorLog.event_time >= cutoff,
+            )
+        )
+    )
+    active_dates: set = set()
+    for log in logs:
+        et = log.event_time
+        if et is None:
+            continue
+        if et.tzinfo is None:
+            et = et.replace(tzinfo=UTC)
+        active_dates.add(et.date())
+
+    series: list[dict[str, Any]] = []
+    for offset in range(days):
+        d = start_day + timedelta(days=offset)
+        series.append({"date": d.isoformat(), "active": d in active_dates})
+
+    weekly_window = series[-7:] if len(series) >= 7 else series
+    weekly_streak = sum(1 for item in weekly_window if item["active"])
+
+    return {
+        "user_id": user_id,
+        "days": series,
+        "weekly_streak_count": weekly_streak,
+    }
 
 
 def create_behavior_log(payload: BehaviorLogCreate, session: Session) -> BehaviorLog:
@@ -458,21 +532,50 @@ def list_users(session: Session) -> list[User]:
     return list(session.exec(select(User)))
 
 
+def _extract_plain_password(data: dict[str, Any]) -> str | None:
+    """`UserCreate`/`UserUpdate` payload'ından düz parolayı ayıkla.
+
+    Geri-uyumluluk için iki alan adı da kabul edilir:
+    - `password`        → yeni (Sprint B sonrası tercih edilen)
+    - `password_hash`   → eski frontend; içerik düz metin parola
+    """
+    plain = data.pop("password", None)
+    legacy = data.pop("password_hash", None)
+    if plain:
+        return str(plain)
+    if legacy:
+        # Hâlihazırda bcrypt hash gönderildiyse aynen kabul et — pratikte
+        # frontend bu yolu kullanmaz, ama korunmaya değer.
+        if looks_like_bcrypt_hash(str(legacy)):
+            data["password_hash"] = str(legacy)
+            return None
+        return str(legacy)
+    return None
+
+
 def login_user(payload: LoginRequest, session: Session) -> User:
     user = session.exec(select(User).where(User.email == payload.email)).first()
-    if user is None or (user.password_hash or "") != payload.password:
+    if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Email veya parola hatali.")
     return user
 
 
 def create_user(payload: UserCreate, session: Session) -> User:
     data = payload.model_dump(exclude_unset=True)
+    gender = data.pop("gender", None)
+    plain_password = _extract_plain_password(data)
+    if plain_password:
+        data["password_hash"] = hash_password(plain_password)
     if not data.get("id"):
         data["id"] = _next_prefixed_id(session, User, "P")
     user = User.model_validate(data)
     session.add(user)
     _commit_or_400(session, "Kullanici olusturulamadi: ID veya email cakismasi olabilir.")
     session.refresh(user)
+    if gender:
+        provision_cold_start_defaults(
+            user, session, gender=gender, save_recommendation=save_recommendation
+        )
     return user
 
 
@@ -480,7 +583,11 @@ def update_user(user_id: str, payload: UserUpdate, session: Session) -> User:
     user = session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User bulunamadi.")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    plain_password = _extract_plain_password(data)
+    if plain_password:
+        data["password_hash"] = hash_password(plain_password)
+    for key, value in data.items():
         setattr(user, key, value)
     session.add(user)
     _commit_or_400(session, "User guncellenemedi: email cakismasi olabilir.")
@@ -553,8 +660,10 @@ def get_latest_pending_recommendation(
     user_id: str,
     session: Session,
     *,
-    max_age_minutes: int = 5,
+    max_age_minutes: int | None = None,
 ) -> Recommendation | None:
+    if max_age_minutes is None:
+        max_age_minutes = settings.recommendation_max_age_minutes
     expire_old_recommendations(session, max_age_minutes=max_age_minutes)
     rows = list(
         session.exec(
@@ -577,7 +686,11 @@ def get_latest_pending_recommendation(
     return None
 
 
-def expire_old_recommendations(session: Session, *, max_age_minutes: int = 5) -> int:
+def expire_old_recommendations(
+    session: Session, *, max_age_minutes: int | None = None
+) -> int:
+    if max_age_minutes is None:
+        max_age_minutes = settings.recommendation_max_age_minutes
     now = datetime.now(UTC)
     cutoff = now - timedelta(minutes=max_age_minutes)
     rows = list(
@@ -691,10 +804,16 @@ def run_inference_for_behavior_log(log_id: int, session: Session) -> dict[str, A
     return decision
 
 
-def detect_safety_anomaly(log: BehaviorLog, session: Session) -> dict[str, Any] | None:
+def detect_safety_anomaly(
+    log: BehaviorLog,
+    session: Session,
+    *,
+    publisher: EventPublisher | None = None,
+    k: float = 2.0,
+) -> dict[str, Any] | None:
     """
-    Cihaz normal acik kalma suresinin 2 kati asildiysa SAFETY_ANOMALY uret.
-    Kontrol, duration_hm bilinen (tipik olarak OFF) loglar icin yapilir.
+    Cihaz normal acik kalma suresinin k kati asildiysa SAFETY_ANOMALY uretir ve
+    AnomalyDetected domain event'ini yayinlar.
     """
     if log.duration_hm is None:
         return None
@@ -713,21 +832,31 @@ def detect_safety_anomaly(log: BehaviorLog, session: Session) -> dict[str, Any] 
         )
     )
     vals = [float(x.duration_hm.total_seconds() / 60.0) for x in prev if x.duration_hm is not None]
-    if len(vals) < 3:
-        return None
-    avg_minutes = sum(vals) / len(vals)
-    if avg_minutes <= 0:
-        return None
-    if cur_minutes < 2.0 * avg_minutes:
+    is_anomaly, avg_minutes = evaluate_duration_anomaly(cur_minutes, vals, k=k, min_samples=3)
+    if not is_anomaly:
         return None
 
     dev = _device_label(session, log.device_id)
+    confidence = min(0.99, cur_minutes / (k * avg_minutes))
+    if publisher is not None:
+        publisher.publish(
+            AnomalyDetected(
+                user_id=log.user_id,
+                device_id=int(log.device_id),
+                device_label=dev,
+                action=str(log.action),
+                current_minutes=cur_minutes,
+                average_minutes=avg_minutes,
+                k_threshold=k,
+                confidence=confidence,
+            )
+        )
     return {
         "type": "SAFETY_ANOMALY",
         "trigger": f"{dev}_{log.action}",
         "target": f"{dev}_CHECK",
         "context": "Safety",
-        "final_confidence": min(0.99, cur_minutes / (2.0 * avg_minutes)),
+        "final_confidence": confidence,
         "message": f"{dev} normal sureyi asti (anomaly).",
     }
 

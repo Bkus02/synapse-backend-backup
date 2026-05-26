@@ -10,11 +10,16 @@ class UserCreate(SQLModel):
     id: str | None = None
     full_name: str | None = None
     email: str | None = None
+    # Düz parola: geriye uyum için `password_hash` ile de gönderilebilir
+    # (Sprint B öncesi frontend bu adı kullanıyordu). Servis katmanı
+    # alınan değeri bcrypt ile hashleyip `User.password_hash`'a yazar.
+    password: str | None = None
     password_hash: str | None = None
     height: int | None = None
     weight: int | None = None
     age: int | None = None
     location: str | None = None
+    gender: str | None = None
 
 
 class LoginRequest(SQLModel):
@@ -22,10 +27,31 @@ class LoginRequest(SQLModel):
     password: str
 
 
+class UserPublic(SQLModel):
+    """Auth/me ve login response icinde kullanilan, password_hash icermeyen view."""
+
+    id: str | None = None
+    full_name: str | None = None
+    email: str | None = None
+    height: int | None = None
+    weight: int | None = None
+    age: int | None = None
+    location: str | None = None
+    avatar_key: str | None = None
+
+
+class LoginResponse(SQLModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int  # saniye
+    user: UserPublic
+
+
 class UserUpdate(SQLModel):
     full_name: str | None = None
     email: str | None = None
-    password_hash: str | None = None
+    password: str | None = None        # yeni: düz parola
+    password_hash: str | None = None   # geri uyum
     height: int | None = None
     weight: int | None = None
     age: int | None = None
@@ -129,3 +155,14 @@ class RecommendationResponse(SQLModel):
 class RecommendationStatusUpdateResponse(SQLModel):
     id: str
     status: str
+
+
+class DailyActivityDay(SQLModel):
+    date: str  # ISO YYYY-MM-DD
+    active: bool
+
+
+class DailyActivityResponse(SQLModel):
+    user_id: str
+    days: list[DailyActivityDay]
+    weekly_streak_count: int

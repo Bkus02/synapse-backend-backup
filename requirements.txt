@@ -1,9 +1,20 @@
-fastapi
-uvicorn[standard]
-sqlmodel
-psycopg2-binary
-pydantic-settings
-pandas
-numpy
-scikit-learn
-joblib
+# Synapse backend — production runtime dependencies (pinned)
+# Python 3.11 / 3.12 doğrulanmıştır.
+
+fastapi==0.115.2
+uvicorn[standard]==0.30.6
+sqlmodel==0.0.22
+SQLAlchemy==2.0.35
+psycopg2-binary==2.9.9
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Analytics
+pandas==2.2.3
+numpy==2.1.2
+scikit-learn==1.5.2
+joblib==1.4.2
+
+# Auth (Sprint B — bcrypt + JWT)
+bcrypt==4.2.0
+PyJWT==2.9.0

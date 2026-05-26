@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-import math
-import os
 
 import pandas as pd
 
 from app.analytics.time_utils import encode_time_cyclic
+from app.core.settings import settings
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class SequenceMinerConfig:
     window_minutes: int = 15
     min_confidence: float = 0.50
     min_support: int = 2
-    decay_lambda: float = float(os.getenv("SEQUENCE_DECAY_LAMBDA", "0.0077"))
+    decay_lambda: float = settings.sequence_decay_lambda
     reference_time: datetime | None = None
 
 
@@ -133,7 +133,9 @@ def mine_habit_sequences(
     for _, grp in df.groupby("user_id", sort=False):
         n = len(grp)
         rows = grp.reset_index(drop=True)
-        ref_time_ts = pd.Timestamp(config.reference_time or datetime.utcnow())
+        ref_time_ts = pd.Timestamp(
+            config.reference_time or datetime.now(UTC).replace(tzinfo=None)
+        )
         for i in range(n):
             trigger = rows.iloc[i]
             trigger_token = _event_token(trigger["device_key"], trigger["action"])

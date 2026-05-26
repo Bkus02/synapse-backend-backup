@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
@@ -16,7 +17,12 @@ from app.api.routes.habits import router as habits_router
 from app.api.routes.recommendations import router as recommendations_router
 from app.api.routes.users import router as users_router
 from app.application.services import smart_home_service
+from app.core.logging_config import configure_logging
+from app.core.settings import settings
 from app.db.database import engine
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -27,18 +33,25 @@ async def lifespan(_: FastAPI):
     stop_event = asyncio.Event()
 
     async def _habit_matrix_scheduler() -> None:
+        rebuild_hour = settings.habit_matrix_rebuild_hour
         while not stop_event.is_set():
             now = datetime.now()
-            next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+            next_run = now.replace(hour=rebuild_hour, minute=0, second=0, microsecond=0)
             if next_run <= now:
                 next_run = next_run + timedelta(days=1)
             wait_sec = (next_run - now).total_seconds()
+            logger.debug("habit matrix scheduler bekliyor: %.0fs", wait_sec)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=wait_sec)
                 break
             except TimeoutError:
                 with Session(engine) as bg_session:
-                    smart_home_service.rebuild_habit_matrix(bg_session)
+                    result = smart_home_service.rebuild_habit_matrix(bg_session)
+                logger.info(
+                    "habit matrix rebuild: users=%s rules=%s",
+                    result.get("users_processed"),
+                    result.get("rules_upserted"),
+                )
 
     task = asyncio.create_task(_habit_matrix_scheduler())
     try:
@@ -48,19 +61,31 @@ async def lifespan(_: FastAPI):
         task.cancel()
         try:
             await task
-        except Exception:
+        except (asyncio.CancelledError, Exception):
+            # Cancellation during shutdown is expected; swallow it cleanly
+            # so the FastAPI lifespan does not bubble a noisy traceback.
             pass
 
 
-app = FastAPI(title="Synapse Backend", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_origins = settings.cors_origin_list
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.get("/", response_class=PlainTextResponse)

@@ -4,20 +4,17 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import '../models/habit.dart';
+import 'session_service.dart';
 import 'user_api.dart';
 
 class HabitApi {
   HabitApi._();
 
-  static const _headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  };
+  static Map<String, String> get _headers =>
+      SessionService.instance.authHeaders();
 
   static Future<List<Habit>> listForUser(String userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/habits').replace(
-      queryParameters: <String, String>{'user_id': userId},
-    );
+    final uri = Uri.parse('${ApiConfig.baseUrl}/habits');
     final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       final list = jsonDecode(response.body) as List<dynamic>;
@@ -36,9 +33,7 @@ class HabitApi {
     double probabilityScore = 0.5,
     int? deviceId,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/habits').replace(
-      queryParameters: <String, String>{'user_id': userId},
-    );
+    final uri = Uri.parse('${ApiConfig.baseUrl}/habits');
     final body = <String, dynamic>{
       'user_id': userId,
       'name': name.trim().isEmpty ? 'Habit' : name.trim(),
@@ -66,9 +61,7 @@ class HabitApi {
     HabitRecurrence? recurrence,
     double? probabilityScore,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/habits/$habitId').replace(
-      queryParameters: <String, String>{'user_id': userId},
-    );
+    final uri = Uri.parse('${ApiConfig.baseUrl}/habits/$habitId');
     final body = <String, dynamic>{
       'name': ?name,
       'is_active': ?isActive,
@@ -88,11 +81,9 @@ class HabitApi {
 
   static Future<void> delete({
     required int habitId,
-    required String userId,
+    String? userId,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/habits/$habitId').replace(
-      queryParameters: <String, String>{'user_id': userId},
-    );
+    final uri = Uri.parse('${ApiConfig.baseUrl}/habits/$habitId');
     final response = await http.delete(uri, headers: _headers);
     if (response.statusCode == 200) {
       return;

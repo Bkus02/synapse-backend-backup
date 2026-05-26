@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
+import '../models/daily_activity.dart';
+import 'session_service.dart';
 
 class UserApiException implements Exception {
   UserApiException(this.message);
@@ -12,11 +14,25 @@ class UserApiException implements Exception {
   String toString() => message;
 }
 
+class LoginResult {
+  LoginResult({
+    required this.user,
+    required this.accessToken,
+    required this.tokenType,
+    required this.expiresIn,
+  });
+
+  final Map<String, dynamic> user;
+  final String accessToken;
+  final String tokenType;
+  final int expiresIn;
+}
+
 class UserApi {
   UserApi._();
 
-  /// Body matches backend `POST /users`. `password_hash` is sent as plain text
-  /// for now; production should hash passwords on the server.
+  /// Body matches backend `POST /users`. Parola düz metin gönderilir;
+  /// backend (Sprint B) bcrypt ile hashleyip `password_hash` olarak saklar.
   static Future<Map<String, dynamic>> register({
     required String fullName,
     required String email,
@@ -30,7 +46,7 @@ class UserApi {
     final body = jsonEncode(<String, dynamic>{
       'full_name': fullName,
       'email': email,
-      'password_hash': password,
+      'password': password,
       'height': height,
       'weight': weight,
       'age': age,
@@ -53,7 +69,7 @@ class UserApi {
     throw UserApiException(_messageFromResponse(response));
   }
 
-  static Future<Map<String, dynamic>> login({
+  static Future<LoginResult> login({
     required String email,
     required String password,
   }) async {
@@ -73,7 +89,13 @@ class UserApi {
     );
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      return LoginResult(
+        user: Map<String, dynamic>.from(decoded['user'] as Map),
+        accessToken: decoded['access_token'] as String? ?? '',
+        tokenType: decoded['token_type'] as String? ?? 'bearer',
+        expiresIn: (decoded['expires_in'] as num?)?.toInt() ?? 0,
+      );
     }
 
     throw UserApiException(_messageFromResponse(response));
@@ -103,15 +125,12 @@ class UserApi {
       body['avatar_key'] = avatarKey;
     }
     if (newPassword != null && newPassword.isNotEmpty) {
-      body['password_hash'] = newPassword;
+      body['password'] = newPassword;
     }
 
     final response = await http.patch(
       uri,
-      headers: const {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers: SessionService.instance.authHeaders(),
       body: jsonEncode(body),
     );
 
@@ -119,6 +138,26 @@ class UserApi {
       return jsonDecode(response.body) as Map<String, dynamic>;
     }
 
+    throw UserApiException(_messageFromResponse(response));
+  }
+
+  /// Returns the trailing daily activity log for the authenticated user.
+  static Future<DailyActivityLog> getDailyActivity({
+    required String userId,
+    int days = 10,
+  }) async {
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/users/$userId/daily-activity',
+    ).replace(queryParameters: {'days': days.toString()});
+    final response = await http.get(
+      uri,
+      headers: SessionService.instance.authHeaders(),
+    );
+    if (response.statusCode == 200) {
+      return DailyActivityLog.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    }
     throw UserApiException(_messageFromResponse(response));
   }
 

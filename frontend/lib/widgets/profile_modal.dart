@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/selected_environment_service.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
 import '../utils/environment_visuals.dart';
@@ -190,6 +191,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
 
   Future<void> _signOut() async {
     await SessionService.instance.clear();
+    await SelectedEnvironmentService.instance.clear();
     if (!mounted) return;
     Navigator.of(context).pop();
     if (!widget.rootContext.mounted) return;

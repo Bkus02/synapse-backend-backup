@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/recommendation.dart';
 import '../services/environment_api.dart';
 import '../services/join_request_inbox.dart';
+import '../services/recommendation_api.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
 
@@ -76,6 +78,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
   bool _loadingJoin = true;
   String? _joinError;
 
+  Recommendation? _activeRecommendation;
+  bool _loadingRecommendation = false;
+  bool _actingOnRecommendation = false;
+
   final List<_TipEntry> _tips = [
     _TipEntry(
       icon: Icons.lightbulb,
@@ -105,6 +111,66 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
   void initState() {
     super.initState();
     _loadJoin();
+    _loadRecommendation();
+  }
+
+  Future<void> _loadRecommendation() async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null || !SessionService.instance.hasToken) {
+      if (mounted) {
+        setState(() {
+          _activeRecommendation = null;
+          _loadingRecommendation = false;
+        });
+      }
+      return;
+    }
+    setState(() => _loadingRecommendation = true);
+    try {
+      final rec = await RecommendationApi.getActive(userId: uid);
+      if (mounted) {
+        setState(() {
+          _activeRecommendation = rec;
+          _loadingRecommendation = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingRecommendation = false);
+    }
+  }
+
+  Future<void> _respondToRecommendation(bool accept) async {
+    final rec = _activeRecommendation;
+    if (rec == null || _actingOnRecommendation) return;
+    setState(() => _actingOnRecommendation = true);
+    try {
+      if (accept) {
+        await RecommendationApi.accept(rec.id);
+      } else {
+        await RecommendationApi.reject(rec.id);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(accept ? 'Suggestion accepted' : 'Suggestion dismissed'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        await _loadRecommendation();
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _actingOnRecommendation = false);
+    }
   }
 
   Future<void> _loadJoin() async {
@@ -245,7 +311,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           ),
                         ),
                         IconButton(
-                          onPressed: _loadJoin,
+                          onPressed: () {
+                            _loadJoin();
+                            _loadRecommendation();
+                          },
                           icon: const Icon(Icons.refresh_rounded),
                           color: widget.accent,
                           tooltip: 'Refresh',
@@ -257,6 +326,128 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     child: ListView(
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Text(
+                            'Synapse suggestions',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (_loadingRecommendation)
+                          const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else if (_activeRecommendation == null)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                            child: Text(
+                              SessionService.instance.user == null
+                                  ? 'Sign in to see AI habit suggestions.'
+                                  : 'No active suggestions right now.',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.45),
+                                fontSize: 14,
+                              ),
+                            ),
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                            child: Card(
+                              color: widget.cardColor,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.auto_awesome,
+                                          color: widget.accent,
+                                          size: 26,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            _activeRecommendation!.headline,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _activeRecommendation!.body,
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.72),
+                                        fontSize: 14,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: _actingOnRecommendation
+                                                ? null
+                                                : () => _respondToRecommendation(false),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.white70,
+                                              side: const BorderSide(
+                                                color: Colors.white24,
+                                              ),
+                                            ),
+                                            child: const Text('Dismiss'),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: FilledButton(
+                                            onPressed: _actingOnRecommendation
+                                                ? null
+                                                : () => _respondToRecommendation(true),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: widget.accent,
+                                            ),
+                                            child: _actingOnRecommendation
+                                                ? const SizedBox(
+                                                    height: 18,
+                                                    width: 18,
+                                                    child: CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: Colors.white,
+                                                    ),
+                                                  )
+                                                : const Text('Accept'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Text(

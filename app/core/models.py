@@ -16,16 +16,25 @@ ENUM ve trigger'lar PostgreSQL tarafında; `create_type=False`.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
 
 from pydantic import field_validator
-from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Interval, Numeric, Text, UniqueConstraint, false
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Integer,
+    Interval,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    false,
+)
 from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlmodel import Field, SQLModel
-
 
 # --- PostgreSQL ENUM karşılıkları ---
 
@@ -92,7 +101,7 @@ _pg_recommendation_status = PG_ENUM(
 )
 
 
-def _check_ph_char8(value: Optional[str], prefix: str, label: str) -> Optional[str]:
+def _check_ph_char8(value: str | None, prefix: str, label: str) -> str | None:
     if value is None:
         return value
     v = value.strip()
@@ -113,36 +122,36 @@ class User(SQLModel, table=True):
 
     __tablename__ = "users"
 
-    id: Optional[str] = Field(
+    id: str | None = Field(
         default=None,
         primary_key=True,
         max_length=8,
         description="userID — P ile başlayan 8 karakter; INSERT’te NULL bırakılırsa DB tetikleyicisi üretebilir.",
     )
-    full_name: Optional[str] = Field(
+    full_name: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="fullName",
     )
-    email: Optional[str] = Field(
+    email: str | None = Field(
         default=None,
         sa_column=Column(Text, unique=True),
         description="E-posta (benzersiz).",
     )
-    password_hash: Optional[str] = Field(
+    password_hash: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Parola özeti (rapor diyagramında yok; güvenlik için DB’de).",
     )
-    height: Optional[int] = Field(default=None, description="Boy (cold-start / öneri).")
-    weight: Optional[int] = Field(default=None, description="Kilo (cold-start / öneri).")
-    age: Optional[int] = Field(default=None, description="Yaş (cold-start / öneri).")
-    location: Optional[str] = Field(
+    height: int | None = Field(default=None, description="Boy (cold-start / öneri).")
+    weight: int | None = Field(default=None, description="Kilo (cold-start / öneri).")
+    age: int | None = Field(default=None, description="Yaş (cold-start / öneri).")
+    location: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Konum / iklim bağlamı.",
     )
-    avatar_key: Optional[str] = Field(
+    avatar_key: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Preset profile avatar key.",
@@ -150,7 +159,7 @@ class User(SQLModel, table=True):
 
     @field_validator("id")
     @classmethod
-    def user_id_db_check(cls, v: Optional[str]) -> Optional[str]:
+    def user_id_db_check(cls, v: str | None) -> str | None:
         if v is None:
             return v
         v = v.strip()
@@ -167,25 +176,25 @@ class Environment(SQLModel, table=True):
 
     __tablename__ = "environments"
 
-    id: Optional[str] = Field(
+    id: str | None = Field(
         default=None,
         primary_key=True,
         max_length=8,
         description="environmentID — H ile başlayan 8 karakter.",
     )
-    name: Optional[str] = Field(default=None, sa_column=Column(Text), description="Ortam / ev adı.")
-    admin_id: Optional[str] = Field(
+    name: str | None = Field(default=None, sa_column=Column(Text), description="Ortam / ev adı.")
+    admin_id: str | None = Field(
         default=None,
         foreign_key="users.id",
         max_length=8,
         description="Ev yöneticisi kullanıcı (User.id).",
     )
-    location: Optional[str] = Field(
+    location: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Konum metni (DB şemasında).",
     )
-    icon_key: Optional[str] = Field(
+    icon_key: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Environment icon key.",
@@ -193,7 +202,7 @@ class Environment(SQLModel, table=True):
 
     @field_validator("id")
     @classmethod
-    def environment_id_db_check(cls, v: Optional[str]) -> Optional[str]:
+    def environment_id_db_check(cls, v: str | None) -> str | None:
         if v is None:
             return v
         v = v.strip()
@@ -213,7 +222,7 @@ class Device(SQLModel, table=True):
 
     __tablename__ = "devices"
 
-    id: Optional[int] = Field(default=None, primary_key=True, description="deviceID (SERIAL).")
+    id: int | None = Field(default=None, primary_key=True, description="deviceID (SERIAL).")
     environment_id: str = Field(
         max_length=8,
         foreign_key="environments.id",
@@ -228,17 +237,17 @@ class Device(SQLModel, table=True):
         sa_column=Column(Boolean, nullable=False, server_default=false()),
         description="Açık/kapalı (On/Off).",
     )
-    current_value: Optional[Decimal] = Field(
+    current_value: Decimal | None = Field(
         default=None,
         sa_column=Column(Numeric),
         description="Parlaklık, sıcaklık gibi sayısal değer.",
     )
-    name: Optional[str] = Field(
+    name: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Örn. Salon Lambası.",
     )
-    room: Optional[str] = Field(
+    room: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Room or zone label.",
@@ -254,7 +263,7 @@ class BehaviorLog(SQLModel, table=True):
 
     __tablename__ = "behavior_logs"
 
-    id: Optional[int] = Field(default=None, primary_key=True, description="logID.")
+    id: int | None = Field(default=None, primary_key=True, description="logID.")
     user_id: str = Field(max_length=8, foreign_key="users.id", description="userID.")
     device_id: int = Field(foreign_key="devices.id", description="deviceID.")
     action: str = Field(
@@ -265,12 +274,12 @@ class BehaviorLog(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=False),
         description="timestamp (dakikaya yuvarlama DB tetikleyicisi ile).",
     )
-    duration_hm: Optional[timedelta] = Field(
+    duration_hm: timedelta | None = Field(
         default=None,
         sa_column=Column(Interval),
         description="Süre (saat+dakika); rapor 3.4.1 ile uyumlu INTERVAL.",
     )
-    parameters: Optional[str] = Field(
+    parameters: str | None = Field(
         default=None,
         sa_column=Column(Text),
         description="Rapor: ek bağlam (örn. Parlaklık: %70).",
@@ -286,7 +295,7 @@ class Habit(SQLModel, table=True):
 
     __tablename__ = "habits"
 
-    id: Optional[int] = Field(default=None, primary_key=True, description="habitID.")
+    id: int | None = Field(default=None, primary_key=True, description="habitID.")
     user_id: str = Field(max_length=8, foreign_key="users.id", description="userID.")
     name: str = Field(
         sa_column=Column(Text, nullable=False),
@@ -305,7 +314,7 @@ class Habit(SQLModel, table=True):
         sa_column=Column(_pg_habit_recurrence, nullable=False),
         description="Günlük / Haftalık / Aylık tekrar.",
     )
-    device_id: Optional[int] = Field(
+    device_id: int | None = Field(
         default=None,
         foreign_key="devices.id",
         description="İlgili cihaz (opsiyonel).",
@@ -315,9 +324,9 @@ class Habit(SQLModel, table=True):
 class PositiveAdvice(SQLModel, table=True):
     __tablename__ = "positive_advices"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     title: str = Field(sa_column=Column(Text, nullable=False))
-    description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    description: str | None = Field(default=None, sa_column=Column(Text))
     category: AdviceCategory = Field(
         default=AdviceCategory.Other,
         sa_column=Column(_pg_advice_category, nullable=False),
@@ -343,11 +352,11 @@ class EnvironmentJoinRequest(SQLModel, table=True):
         UniqueConstraint("environment_id", "user_id", name="uq_env_join_user"),
     )
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     environment_id: str = Field(max_length=8, foreign_key="environments.id")
     user_id: str = Field(max_length=8, foreign_key="users.id")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
@@ -355,7 +364,7 @@ class EnvironmentJoinRequest(SQLModel, table=True):
 class UserStreak(SQLModel, table=True):
     __tablename__ = "user_streaks"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     user_id: str = Field(max_length=8, foreign_key="users.id")
     advice_id: int = Field(foreign_key="positive_advices.id")
     current_streak: int = Field(
@@ -366,7 +375,7 @@ class UserStreak(SQLModel, table=True):
         default=0,
         sa_column=Column(Integer, nullable=False, server_default="0"),
     )
-    last_completed_on: Optional[date] = Field(
+    last_completed_on: date | None = Field(
         default=None,
         sa_column=Column(Date),
     )

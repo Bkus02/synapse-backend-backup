@@ -4,25 +4,21 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import '../models/environment_device.dart';
+import 'session_service.dart';
 import 'user_api.dart';
 
 class DeviceApi {
   DeviceApi._();
 
-  static const _headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  };
+  static Map<String, String> get _headers =>
+      SessionService.instance.authHeaders();
 
   static Future<List<EnvironmentDevice>> listForEnvironment({
     required String environmentId,
-    required String userId,
+    String? userId,
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/devices').replace(
-      queryParameters: <String, String>{
-        'environment_id': environmentId,
-        'user_id': userId,
-      },
+      queryParameters: <String, String>{'environment_id': environmentId},
     );
     final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
@@ -35,7 +31,7 @@ class DeviceApi {
   }
 
   static Future<EnvironmentDevice> create({
-    required String userId,
+    String? userId,
     required String environmentId,
     required EnvironmentDeviceType type,
     required String name,
@@ -43,9 +39,7 @@ class DeviceApi {
     bool status = false,
     double? currentValue,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/devices').replace(
-      queryParameters: <String, String>{'user_id': userId},
-    );
+    final uri = Uri.parse('${ApiConfig.baseUrl}/devices');
     final body = <String, dynamic>{
       'environment_id': environmentId,
       'type': type.apiValue,
@@ -69,11 +63,9 @@ class DeviceApi {
 
   static Future<void> delete({
     required int deviceId,
-    required String userId,
+    String? userId,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/devices/$deviceId').replace(
-      queryParameters: <String, String>{'user_id': userId},
-    );
+    final uri = Uri.parse('${ApiConfig.baseUrl}/devices/$deviceId');
     final response = await http.delete(uri, headers: _headers);
     if (response.statusCode == 200) {
       return;
