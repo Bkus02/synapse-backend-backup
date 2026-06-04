@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
 from app.api.deps import current_user_id
@@ -81,6 +81,31 @@ def get_environment_members(
     smart_home_service.require_environment_access(token_user_id, environment_id, session)
     raw = smart_home_service.list_environment_members(environment_id, session)
     return [EnvironmentMemberOut.model_validate(row) for row in raw]
+
+
+@router.get("/{environment_id}/streaks")
+def get_environment_streaks(
+    environment_id: str,
+    days: int = Query(10, ge=1, le=60, description="Number of trailing days."),
+    limit: int | None = Query(
+        None,
+        ge=1,
+        le=50,
+        description="Optional max members to return (top N by streak).",
+    ),
+    token_user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> list[dict[str, object]]:
+    """Per-member weekly streak in an environment (sorted by streak desc)."""
+    smart_home_service.require_environment_access(
+        token_user_id, environment_id, session
+    )
+    rows = smart_home_service.list_environment_streaks(
+        environment_id, session, days=days
+    )
+    if limit is not None:
+        rows = rows[:limit]
+    return rows
 
 
 @router.get("/{environment_id}/join-requests", response_model=list[JoinRequestOut])

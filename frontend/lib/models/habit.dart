@@ -32,6 +32,53 @@ HabitRecurrence habitRecurrenceFromApi(String raw) {
   }
 }
 
+/// Whether a habit was derived from device telemetry or a positive-advice routine.
+///
+/// The split is purely a UI grouping. Both kinds live in the same `habits`
+/// table; we just look at the row's name prefix that the backend writes:
+///   - `Routine: ...` (hourly device routine)     → [HabitKind.device]
+///   - `Device:  ...` (sequence A→B pair)         → [HabitKind.device]
+///   - `Advice:  ...` (positive advice ≥10 logs)  → [HabitKind.positive]
+///   - `Custom:  ...` (manually added by the user) → [HabitKind.positive]
+///   - no prefix (legacy / free-form manual)       → [HabitKind.positive]
+enum HabitKind { device, positive }
+
+extension HabitKindX on Habit {
+  HabitKind get kind {
+    final n = name;
+    if (n.startsWith('Routine:') || n.startsWith('Device:')) {
+      return HabitKind.device;
+    }
+    return HabitKind.positive;
+  }
+
+  /// Trim the prefix so the UI shows a clean title.
+  String get displayName {
+    final n = name;
+    for (final prefix in const [
+      'Routine: ',
+      'Device: ',
+      'Advice: ',
+      'Custom: ',
+    ]) {
+      if (n.startsWith(prefix)) {
+        return n.substring(prefix.length);
+      }
+    }
+    return n;
+  }
+
+  /// Compact tag rendered next to the title (e.g. "Routine", "Sequence", "Manual").
+  String get kindBadge {
+    final n = name;
+    if (n.startsWith('Routine:')) return 'Routine';
+    if (n.startsWith('Device:')) return 'Sequence';
+    if (n.startsWith('Advice:')) return 'Advice';
+    if (n.startsWith('Custom:')) return 'Manual';
+    return 'Manual';
+  }
+}
+
 /// Hysteresis bands (matches DB trigger logic: above 0.6 on, below 0.45 off, between either).
 enum HabitProbabilityBand {
   /// `probability_score` above 0.60 — habit is on.

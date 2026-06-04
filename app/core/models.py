@@ -22,18 +22,21 @@ from enum import Enum
 
 from pydantic import field_validator
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     Date,
     DateTime,
+    ForeignKey,
     Integer,
     Interval,
     Numeric,
     Text,
     UniqueConstraint,
     false,
+    text as sql_text,
 )
-from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM, JSONB
 from sqlmodel import Field, SQLModel
 
 # --- PostgreSQL ENUM karşılıkları ---
@@ -381,6 +384,58 @@ class UserStreak(SQLModel, table=True):
     )
 
 
+class PositiveAdviceLog(SQLModel, table=True):
+    """Bir kullanıcının pozitif tavsiyeyi tamamladığı kayıt.
+
+    `advice_key` kataloğumuzdaki anahtardır (ör. ``strength_training``),
+    `advice_title` görünüm için denormalize edilmiş başlıktır.
+    """
+
+    __tablename__ = "positive_advice_logs"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(max_length=8, foreign_key="users.id")
+    advice_key: str = Field(sa_column=Column(Text, nullable=False))
+    advice_title: str = Field(sa_column=Column(Text, nullable=False))
+    category: AdviceCategory = Field(
+        default=AdviceCategory.Other,
+        sa_column=Column(_pg_advice_category, nullable=False),
+    )
+    completed_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    duration_minutes: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
+
+
+class UserDailyStreak(SQLModel, table=True):
+    """Kullanıcı başına günlük "qualifying day" streak'i.
+
+    Bir gün ≥2 farklı pozitif tavsiye tamamlandığında "qualifying" sayılır.
+    Ardışık qualifying günler ``current_streak``'i artırır.
+    """
+
+    __tablename__ = "user_daily_streaks"
+
+    user_id: str = Field(max_length=8, primary_key=True, foreign_key="users.id")
+    current_streak: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
+    max_streak: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
+    last_qualifying_date: date | None = Field(default=None, sa_column=Column(Date))
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
 class Recommendation(SQLModel, table=True):
     __tablename__ = "recommendations"
 
@@ -407,3 +462,121 @@ class Recommendation(SQLModel, table=True):
         ),
     )
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
+# -----------------------------------------------------------------------
+# Notifications & advice schedules
+# -----------------------------------------------------------------------
+
+
+class NotificationKind(str, Enum):
+    """Identifier for the kind of notification — extensible TEXT column."""
+
+    MorningGreeting = "morning_greeting"
+    AdviceReminder = "advice_reminder"
+    DeviceRoutine = "device_routine"
+    SequenceTrigger = "sequence_trigger"
+    StreakMilestone = "streak_milestone"
+    SafetyAnomaly = "safety_anomaly"
+
+
+class NotificationStatus(str, Enum):
+    Pending = "pending"
+    Fired = "fired"
+    Confirmed = "confirmed"
+    Dismissed = "dismissed"
+    Expired = "expired"
+
+
+class Notification(SQLModel, table=True):
+    """In-app notification feed entry.
+
+    Notifications are *persistent* — they live in this table until the user
+    confirms / dismisses them, or until end-of-day expiry. ``status`` walks
+    the lifecycle: ``pending`` → ``fired`` (visible) → ``confirmed`` /
+    ``dismissed`` / ``expired``.
+
+    ``payload`` carries kind-specific extras (advice_key, device_id,
+    schedule_id, etc.) as JSONB so we can extend kinds without migrations.
+    """
+
+    __tablename__ = "notifications"
+
+    id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+    )
+    user_id: str = Field(max_length=8, foreign_key="users.id")
+    kind: str = Field(sa_column=Column(Text, nullable=False))
+    title: str = Field(sa_column=Column(Text, nullable=False))
+    body: str = Field(sa_column=Column(Text, nullable=False))
+    scheduled_for: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    fired_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    status: str = Field(
+        default=NotificationStatus.Pending.value,
+        sa_column=Column(Text, nullable=False, server_default="pending"),
+    )
+    requires_action: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=false()),
+    )
+    payload: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class AdviceSchedule(SQLModel, table=True):
+    """User-planned positive-advice session.
+
+    Created when the user picks a start time + duration from the dashboard.
+    The accompanying `advice_reminder` Notification row holds the bell-feed
+    entry; on confirm we look up this schedule by `notification_id` and
+    log the actual positive_advice completion.
+    """
+
+    __tablename__ = "advice_schedules"
+
+    id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+    )
+    user_id: str = Field(max_length=8, foreign_key="users.id")
+    advice_key: str = Field(sa_column=Column(Text, nullable=False))
+    advice_title: str = Field(sa_column=Column(Text, nullable=False))
+    scheduled_for: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    duration_minutes: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
+    status: str = Field(
+        default="pending",
+        sa_column=Column(Text, nullable=False, server_default="pending"),
+    )
+    notification_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            BigInteger,
+            ForeignKey("notifications.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

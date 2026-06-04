@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+
 class WelcomePage extends StatelessWidget {
   const WelcomePage({super.key});
 
@@ -9,14 +11,15 @@ class WelcomePage extends StatelessWidget {
     final maxImageWidth = MediaQuery.sizeOf(context).width - 56;
 
     return Scaffold(
+      backgroundColor: AppColors.scaffold,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF02051A),
-              Color(0xFF050C2A),
+              Color(0xFFFFFFFF),
+              AppColors.accentLight,
             ],
           ),
         ),
@@ -49,7 +52,7 @@ class WelcomePage extends StatelessWidget {
                             'SYNAPSE',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.displaySmall?.copyWith(
-                              color: Colors.white,
+                              color: AppColors.textPrimary,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 6,
                             ),
@@ -59,7 +62,7 @@ class WelcomePage extends StatelessWidget {
                             'Welcome to a\npersonalized living\nspace experience.',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.titleMedium?.copyWith(
-                              color: Colors.white70,
+                              color: AppColors.textSecondary,
                               height: 1.4,
                             ),
                           ),
@@ -68,7 +71,7 @@ class WelcomePage extends StatelessWidget {
                             'Control your smart home,\nlet Synapse learn your habits\nand optimize comfort for you.',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.white54,
+                              color: AppColors.textMuted,
                               height: 1.4,
                             ),
                           ),
@@ -83,8 +86,8 @@ class WelcomePage extends StatelessWidget {
                   height: 56,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4C6FFF),
-                      foregroundColor: Colors.white,
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: AppColors.textOnAccent,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),

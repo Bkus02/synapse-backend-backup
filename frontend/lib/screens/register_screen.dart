@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/user_api.dart';
+import '../theme/app_colors.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -18,34 +19,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _heightController = TextEditingController();
   final _weightController = TextEditingController();
   final _ageController = TextEditingController();
-  final _locationController = TextEditingController();
+  String _selectedCity = 'istanbul';
+
+  static const _cityOptions = <Map<String, String>>[
+    {'key': 'istanbul', 'label': 'Istanbul'},
+    {'key': 'ankara', 'label': 'Ankara'},
+    {'key': 'izmir', 'label': 'Izmir'},
+  ];
 
   bool _submitting = false;
 
-  static const _fieldBorder = OutlineInputBorder(
-    borderRadius: BorderRadius.all(Radius.circular(12)),
-    borderSide: BorderSide(color: Colors.white24),
-  );
-
   InputDecoration _decoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: Colors.white60),
-      floatingLabelStyle: const TextStyle(color: Color(0xFF4C6FFF)),
-      filled: true,
-      fillColor: const Color(0xFF0A1020),
-      border: _fieldBorder,
-      enabledBorder: _fieldBorder,
-      focusedBorder: _fieldBorder.copyWith(
-        borderSide: const BorderSide(color: Color(0xFF4C6FFF), width: 1.5),
-      ),
-      errorBorder: _fieldBorder.copyWith(
-        borderSide: const BorderSide(color: Colors.redAccent),
-      ),
-      focusedErrorBorder: _fieldBorder.copyWith(
-        borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
-      ),
-    );
+    return InputDecoration(labelText: label);
   }
 
   String? _required(String? value) {
@@ -75,7 +60,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         height: height,
         weight: weight,
         age: age,
-        location: _locationController.text.trim(),
+        location: _selectedCity,
       );
       if (!mounted) return;
       final email = _emailController.text.trim();
@@ -92,7 +77,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -101,7 +86,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Connection error. Is the backend running?'),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -120,7 +105,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _heightController.dispose();
     _weightController.dispose();
     _ageController.dispose();
-    _locationController.dispose();
     super.dispose();
   }
 
@@ -143,7 +127,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Text(
                 'Create your account',
                 style: theme.textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
+                  color: AppColors.textPrimary,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -151,14 +135,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Text(
                 'Please fill in all fields.',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Colors.white54,
+                  color: AppColors.textSecondary,
                 ),
               ),
               const SizedBox(height: 24),
               TextFormField(
                 controller: _fullNameController,
                 textInputAction: TextInputAction.next,
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _decoration('Full Name'),
                 validator: _required,
                 textCapitalization: TextCapitalization.words,
@@ -169,7 +153,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 autofillHints: const [AutofillHints.email],
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _decoration('Email'),
                 validator: _required,
               ),
@@ -179,7 +163,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 obscureText: true,
                 textInputAction: TextInputAction.next,
                 autofillHints: const [AutofillHints.newPassword],
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _decoration('Password'),
                 validator: _required,
               ),
@@ -195,7 +179,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       textInputAction: TextInputAction.next,
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: AppColors.textPrimary),
                       decoration: _decoration('Height (cm)'),
                       validator: _required,
                     ),
@@ -209,7 +193,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       textInputAction: TextInputAction.next,
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: AppColors.textPrimary),
                       decoration: _decoration('Weight (kg)'),
                       validator: _required,
                     ),
@@ -224,27 +208,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   FilteringTextInputFormatter.digitsOnly,
                 ],
                 textInputAction: TextInputAction.next,
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _decoration('Age'),
                 validator: _required,
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _locationController,
-                textInputAction: TextInputAction.done,
-                onFieldSubmitted: (_) => _onRegister(),
-                style: const TextStyle(color: Colors.white),
+              InputDecorator(
                 decoration: _decoration('Location'),
-                validator: _required,
-                textCapitalization: TextCapitalization.words,
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedCity,
+                    isExpanded: true,
+                    style: const TextStyle(color: AppColors.textPrimary),
+                    dropdownColor: AppColors.surface,
+                    items: _cityOptions
+                        .map(
+                          (c) => DropdownMenuItem<String>(
+                            value: c['key'],
+                            child: Text(c['label']!),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _submitting
+                        ? null
+                        : (v) {
+                            if (v != null) {
+                              setState(() => _selectedCity = v);
+                            }
+                          },
+                  ),
+                ),
               ),
               const SizedBox(height: 32),
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4C6FFF),
-                    foregroundColor: Colors.white,
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: AppColors.textOnAccent,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
@@ -257,7 +258,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           height: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: AppColors.textOnAccent,
                           ),
                         )
                       : const Text(

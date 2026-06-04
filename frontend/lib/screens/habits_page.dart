@@ -4,9 +4,7 @@ import '../models/habit.dart';
 import '../services/habit_api.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
-
-const _accent = Color(0xFF4C6FFF);
-const _card = Color(0xFF0C1021);
+import '../theme/app_colors.dart';
 
 class HabitsPage extends StatefulWidget {
   const HabitsPage({super.key});
@@ -72,56 +70,14 @@ class _HabitsPageState extends State<HabitsPage> {
     }
   }
 
-  Future<void> _toggleActive(Habit h, bool value) async {
-    final uid = SessionService.instance.user?['id'] as String?;
-    if (uid == null) return;
-    setState(() => _patchingIds.add(h.id));
-    try {
-      final updated = await HabitApi.patch(
-        habitId: h.id,
-        userId: uid,
-        isActive: value,
-      );
-      if (mounted) {
-        setState(() {
-          final i = _habits.indexWhere((e) => e.id == h.id);
-          if (i >= 0) {
-            _habits[i] = updated;
-          }
-        });
-      }
-    } on UserApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _patchingIds.remove(h.id));
-      }
-    }
-  }
-
   Future<void> _confirmDelete(Habit h) async {
     final uid = SessionService.instance.user?['id'] as String?;
     if (uid == null) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF15192E),
-        title: const Text(
-          'Delete habit',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Remove "${h.name}"? This cannot be undone.',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        title: const Text('Delete habit'),
+        content: Text('Remove "${h.name}"? This cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -174,13 +130,13 @@ class _HabitsPageState extends State<HabitsPage> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF15192E),
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => _AddHabitSheet(
         userId: uid,
-        accent: _accent,
+        accent: AppColors.accent,
         onCreated: () {
           Navigator.pop(ctx);
           _load();
@@ -195,17 +151,285 @@ class _HabitsPageState extends State<HabitsPage> {
     );
   }
 
+  List<Widget> _buildHabitSections(ThemeData theme) {
+    final device = _habits.where((h) => h.kind == HabitKind.device).toList();
+    final positive =
+        _habits.where((h) => h.kind == HabitKind.positive).toList();
+
+    int byProb(Habit a, Habit b) => b.probabilityScore.compareTo(a.probabilityScore);
+    device.sort(byProb);
+    positive.sort(byProb);
+
+    final sections = <Widget>[];
+    if (positive.isNotEmpty) {
+      sections.add(_sectionHeader(
+        theme,
+        title: 'Positive Habits',
+        subtitle: 'Advice + manually-added habits',
+        icon: Icons.favorite_rounded,
+        count: positive.length,
+      ));
+      sections.add(_habitListSliver(positive, theme));
+    }
+    if (device.isNotEmpty) {
+      sections.add(_sectionHeader(
+        theme,
+        title: 'Device Habits',
+        subtitle: 'Auto-discovered device routines from logs',
+        icon: Icons.devices_rounded,
+        count: device.length,
+      ));
+      sections.add(_habitListSliver(device, theme));
+    }
+    sections.add(const SliverToBoxAdapter(child: SizedBox(height: 100)));
+    return sections;
+  }
+
+  Widget _sectionHeader(
+    ThemeData theme, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required int count,
+  }) {
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+      sliver: SliverToBoxAdapter(
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.accentLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: AppColors.accent, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _habitListSliver(List<Habit> habits, ThemeData theme) {
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      sliver: SliverList.separated(
+        itemCount: habits.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, i) => _habitCard(habits[i], theme),
+      ),
+    );
+  }
+
+  Widget _habitCard(Habit h, ThemeData theme) {
+    final busy = _patchingIds.contains(h.id);
+    final isDevice = h.kind == HabitKind.device;
+    final iconData = isDevice ? Icons.devices_rounded : Icons.auto_awesome;
+
+    final pct = (h.probabilityScore.clamp(0.0, 1.0) * 100).round();
+    final band = h.probabilityBand;
+    final barColor = switch (band) {
+      HabitProbabilityBand.confirmed => Colors.greenAccent.shade700,
+      HabitProbabilityBand.ambiguous => Colors.orangeAccent,
+      HabitProbabilityBand.notHabit => Colors.redAccent,
+    };
+    final stateLabel = switch (band) {
+      HabitProbabilityBand.confirmed => 'Habit formed',
+      HabitProbabilityBand.ambiguous => 'On track — keep going',
+      HabitProbabilityBand.notHabit => 'Not a habit yet',
+    };
+
+    return Container(
+      decoration: AppColors.cardDecoration(),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(iconData, color: AppColors.accent, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                h.displayName,
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: Text(
+                                h.kindBadge,
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(
+                              h.recurrence.label,
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 4,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: AppColors.textMuted,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              h.isActive ? 'Active' : 'Inactive',
+                              style: TextStyle(
+                                color: h.isActive
+                                    ? Colors.greenAccent.shade700
+                                    : AppColors.textMuted,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '$pct%',
+                    style: TextStyle(
+                      color: barColor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: busy ? null : () => _confirmDelete(h),
+                    icon: busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.delete_outline_rounded),
+                    color: AppColors.textMuted,
+                    tooltip: 'Delete',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: h.probabilityScore.clamp(0.0, 1.0),
+                  minHeight: 6,
+                  backgroundColor: AppColors.surfaceMuted,
+                  valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                stateLabel,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final uid = SessionService.instance.user?['id'] as String?;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF050814),
       floatingActionButton: uid != null
           ? FloatingActionButton.extended(
               onPressed: _loading ? null : _openAddSheet,
-              backgroundColor: _accent,
+              backgroundColor: AppColors.accent,
               icon: const Icon(Icons.add_rounded),
               label: const Text('Add habit'),
               tooltip: 'Create a new habit',
@@ -213,7 +437,7 @@ class _HabitsPageState extends State<HabitsPage> {
           : null,
       body: SafeArea(
         child: RefreshIndicator(
-          color: _accent,
+          color: AppColors.accent,
           onRefresh: _load,
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -224,7 +448,7 @@ class _HabitsPageState extends State<HabitsPage> {
                   child: Text(
                     'Habits',
                     style: theme.textTheme.titleLarge?.copyWith(
-                      color: Colors.white,
+                      color: AppColors.textPrimary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -244,7 +468,7 @@ class _HabitsPageState extends State<HabitsPage> {
                     child: Text(
                       'Sign in to load your habits.',
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white54,
+                        color: AppColors.textSecondary,
                       ),
                     ),
                   ),
@@ -269,7 +493,7 @@ class _HabitsPageState extends State<HabitsPage> {
                         'No habits yet.\nTap Add habit to create one.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyLarge?.copyWith(
-                          color: Colors.white38,
+                          color: AppColors.textMuted,
                           height: 1.5,
                         ),
                       ),
@@ -277,117 +501,7 @@ class _HabitsPageState extends State<HabitsPage> {
                   ),
                 )
               else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                  sliver: SliverList.separated(
-                    itemCount: _habits.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 10),
-                    itemBuilder: (context, i) {
-                      final h = _habits[i];
-                      final busy = _patchingIds.contains(h.id);
-                      return Material(
-                        color: _card,
-                        borderRadius: BorderRadius.circular(16),
-                        clipBehavior: Clip.antiAlias,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: _accent.withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      Icons.auto_awesome,
-                                      color: _accent,
-                                      size: 22,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          h.name,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          h.recurrence.label,
-                                          style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.5),
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  IconButton(
-                                    onPressed: () => _confirmDelete(h),
-                                    icon: const Icon(
-                                      Icons.delete_outline_rounded,
-                                    ),
-                                    color: Colors.white38,
-                                    tooltip: 'Delete',
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Text(
-                                    'Active',
-                                    style: theme.textTheme.labelLarge?.copyWith(
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  if (busy)
-                                    const SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  else
-                                    Switch.adaptive(
-                                      value: h.isActive,
-                                      activeTrackColor:
-                                          _accent.withValues(alpha: 0.55),
-                                      onChanged: (v) => _toggleActive(h, v),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${(h.probabilityScore * 100).round()}%',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.38),
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
+                ..._buildHabitSections(theme),
             ],
           ),
         ),
@@ -483,47 +597,23 @@ class _AddHabitSheetState extends State<_AddHabitSheet> {
           Text(
             'New habit',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
+                      color: AppColors.textOnAccent,
                   fontWeight: FontWeight.w700,
                 ),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _name,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              labelText: 'Name',
-              labelStyle: const TextStyle(color: Colors.white54),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Colors.white24),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: widget.accent),
-              ),
-            ),
+            decoration: const InputDecoration(labelText: 'Name'),
           ),
           const SizedBox(height: 16),
           InputDecorator(
-            decoration: InputDecoration(
-              labelText: 'Repeat',
-              labelStyle: const TextStyle(color: Colors.white54),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Colors.white24),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: widget.accent),
-              ),
-            ),
+            decoration: const InputDecoration(labelText: 'Repeat'),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<HabitRecurrence>(
                 value: _recurrence,
                 isExpanded: true,
-                dropdownColor: const Color(0xFF1E2440),
-                style: const TextStyle(color: Colors.white),
+                dropdownColor: AppColors.surface,
                 items: types
                     .map(
                       (t) => DropdownMenuItem(
@@ -545,10 +635,7 @@ class _AddHabitSheetState extends State<_AddHabitSheet> {
           const SizedBox(height: 12),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Active',
-              style: TextStyle(color: Colors.white70),
-            ),
+            title: const Text('Active'),
             value: _isActive,
             activeTrackColor: widget.accent.withValues(alpha: 0.55),
             onChanged: _saving
@@ -573,7 +660,7 @@ class _AddHabitSheetState extends State<_AddHabitSheet> {
                     width: 22,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Colors.white,
+                      color: AppColors.textPrimary,
                     ),
                   )
                 : const Text('Save'),

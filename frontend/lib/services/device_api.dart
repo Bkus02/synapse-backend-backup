@@ -61,6 +61,34 @@ class DeviceApi {
     throw UserApiException(UserApi.errorMessageFromResponse(response));
   }
 
+  /// PATCH `/devices/{id}` — partial update; sadece verilen alanlar gönderilir.
+  static Future<EnvironmentDevice> patch({
+    required int deviceId,
+    bool? status,
+    double? currentValue,
+    String? name,
+    String? room,
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/devices/$deviceId');
+    final body = <String, dynamic>{
+      if (status != null) 'status': status,
+      if (currentValue != null) 'current_value': currentValue,
+      if (name != null) 'name': name,
+      if (room != null) 'room': room,
+    };
+    final response = await http.patch(
+      uri,
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    if (response.statusCode == 200) {
+      return EnvironmentDevice.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    }
+    throw UserApiException(UserApi.errorMessageFromResponse(response));
+  }
+
   static Future<void> delete({
     required int deviceId,
     String? userId,

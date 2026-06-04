@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../../theme/app_colors.dart';
 
 class StreakGeneWidget extends StatefulWidget {
   const StreakGeneWidget({
@@ -47,9 +48,9 @@ class _StreakGeneWidgetState extends State<StreakGeneWidget>
       child: Container(
         height: widget.height,
         decoration: BoxDecoration(
-          color: const Color(0xFF0B1022),
+          color: AppColors.accentLight,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: AppColors.border),
         ),
         child: AnimatedBuilder(
           animation: _controller,
@@ -81,8 +82,8 @@ class _StreakGenePainter extends CustomPainter {
   final double animationShift;
   final double radius;
 
-  static const _active = Color(0xFF4C6FFF);
-  static const _inactive = Color(0xFF56607A);
+  static const _active = AppColors.accent;
+  static const _inactive = AppColors.borderStrong;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -118,7 +119,7 @@ class _StreakGenePainter extends CustomPainter {
     final rungPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.4
-      ..color = Colors.white24;
+      ..color = AppColors.border;
 
     for (var i = 0; i < count; i++) {
       final x = spacing * (i + 1);

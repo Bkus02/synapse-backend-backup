@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 
 /// Environment card icons (keys match backend `icon_key`).
 IconData environmentIconForKey(String? key) {
@@ -89,13 +90,13 @@ Widget memberAvatar({
 
   return CircleAvatar(
     radius: radius,
-    backgroundColor: const Color(0xFF2A3148),
+    backgroundColor: AppColors.accentLight,
     child: icon != null
-        ? Icon(icon, color: Colors.white, size: radius * 1.1)
+        ? Icon(icon, color: AppColors.textPrimary, size: radius * 1.1)
         : Text(
             initial,
             style: TextStyle(
-              color: Colors.white,
+              color: AppColors.textPrimary,
               fontSize: radius * 0.95,
               fontWeight: FontWeight.w700,
             ),

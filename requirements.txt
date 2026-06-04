@@ -18,3 +18,7 @@ joblib==1.4.2
 # Auth (Sprint B — bcrypt + JWT)
 bcrypt==4.2.0
 PyJWT==2.9.0
+
+# Smart devices (Tuya / Smart Life cloud)
+tuya-connector-python==0.1.2
+requests==2.32.3

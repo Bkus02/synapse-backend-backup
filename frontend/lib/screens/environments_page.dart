@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 
 import '../models/environment_summary.dart';
 import '../services/environment_api.dart';
@@ -24,9 +25,7 @@ class EnvironmentsPage extends StatefulWidget {
 }
 
 class _EnvironmentsPageState extends State<EnvironmentsPage> {
-  static const _accent = Color(0xFF4C6FFF);
-  static const _card = Color(0xFF0C1021);
-
+    
   List<EnvironmentSummary> _envs = [];
   bool _loading = true;
   String? _error;
@@ -177,7 +176,7 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
 
     return SafeArea(
       child: RefreshIndicator(
-        color: _accent,
+        color: AppColors.accent,
         onRefresh: _reload,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -193,8 +192,8 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                         icon: Icons.add_home_outlined,
                         title: 'Add Environment',
                         subtitle: 'Create a new space',
-                        accent: _accent,
-                        card: _card,
+                        accent: AppColors.accent,
+                        card: AppColors.surface,
                         onTap: _openAddEnvironment,
                       ),
                     ),
@@ -204,8 +203,8 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                         icon: Icons.link_rounded,
                         title: 'Join Environment',
                         subtitle: 'Join with an environment ID',
-                        accent: _accent,
-                        card: _card,
+                        accent: AppColors.accent,
+                        card: AppColors.surface,
                         onTap: _openJoinEnvironment,
                       ),
                     ),
@@ -219,7 +218,7 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                 child: Text(
                   'My Environments',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
+                    color: AppColors.textPrimary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -250,7 +249,7 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                     _userId == null
                         ? 'Sign in to see your environments.'
                         : 'No environments yet. Add one or join above.',
-                    style: const TextStyle(color: Colors.white54),
+                    style: const TextStyle(color: AppColors.textSecondary),
                   ),
                 ),
               )
@@ -265,8 +264,8 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
                     final env = _envs[index];
                     return _EnvironmentCard(
                       environment: env,
-                      accent: _accent,
-                      card: _card,
+                      accent: AppColors.accent,
+                      card: AppColors.surface,
                       onTap: () async {
                         await SelectedEnvironmentService.instance
                             .setSelected(env.id);
@@ -327,7 +326,7 @@ class _ActionPill extends StatelessWidget {
               Text(
                 title,
                 style: theme.textTheme.titleSmall?.copyWith(
-                  color: Colors.white,
+                  color: AppColors.textPrimary,
                   fontWeight: FontWeight.w700,
                   height: 1.2,
                 ),
@@ -336,7 +335,7 @@ class _ActionPill extends StatelessWidget {
               Text(
                 subtitle,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: Colors.white54,
+                  color: AppColors.textSecondary,
                   height: 1.35,
                 ),
               ),
@@ -392,14 +391,14 @@ class _EnvironmentCard extends StatelessWidget {
                     child: Text(
                       environment.name,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
+                        color: AppColors.textPrimary,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                   Icon(
                     Icons.chevron_right_rounded,
-                    color: Colors.white.withValues(alpha: 0.35),
+                    color: AppColors.textPrimary.withValues(alpha: 0.35),
                   ),
                 ],
               ),
@@ -420,7 +419,7 @@ class _EnvironmentCard extends StatelessWidget {
                         Text(
                           'Location',
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.45),
+                            color: AppColors.textPrimary.withValues(alpha: 0.45),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -428,7 +427,7 @@ class _EnvironmentCard extends StatelessWidget {
                         Text(
                           environment.location,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.88),
+                            color: AppColors.textPrimary.withValues(alpha: 0.88),
                             height: 1.3,
                           ),
                         ),
@@ -555,7 +554,7 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
           maxHeight: MediaQuery.of(context).size.height * 0.92,
         ),
         decoration: const BoxDecoration(
-          color: Color(0xFF0C1021),
+          color: AppColors.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: SingleChildScrollView(
@@ -568,7 +567,7 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.white24,
+                    color: AppColors.border,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -577,7 +576,7 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
               const Text(
                 'New environment',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: AppColors.textPrimary,
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
                 ),
@@ -585,7 +584,7 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
               const SizedBox(height: 16),
               Text(
                 'Environment ID',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                style: TextStyle(color: AppColors.textPrimary.withValues(alpha: 0.5), fontSize: 12),
               ),
               const SizedBox(height: 6),
               if (_loadingId)
@@ -596,7 +595,7 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
                 SelectableText(
                   _suggestedId ?? '—',
                   style: const TextStyle(
-                    color: Color(0xFF4C6FFF),
+                    color: AppColors.accent,
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                     fontFamily: 'monospace',
@@ -605,19 +604,19 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
               const SizedBox(height: 16),
               TextField(
                 controller: _nameCtrl,
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _fieldDeco('Environment name (e.g. Home)'),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _locCtrl,
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _fieldDeco('Location'),
               ),
               const SizedBox(height: 16),
               Text(
                 'Appearance',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                style: TextStyle(color: AppColors.textPrimary.withValues(alpha: 0.5), fontSize: 12),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -632,13 +631,13 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
                         color: selected
-                            ? const Color(0xFF4C6FFF).withValues(alpha: 0.25)
-                            : const Color(0xFF151A2E),
+                            ? AppColors.accent.withValues(alpha: 0.25)
+                            : AppColors.surfaceMuted,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: selected
-                              ? const Color(0xFF4C6FFF)
-                              : Colors.white12,
+                              ? AppColors.accent
+                              : AppColors.border,
                         ),
                       ),
                       child: Row(
@@ -646,13 +645,13 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
                         children: [
                           Icon(
                             environmentIconForKey(e.key),
-                            color: Colors.white70,
+                            color: AppColors.textSecondary,
                             size: 20,
                           ),
                           const SizedBox(width: 6),
                           Text(
                             e.value,
-                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
                           ),
                         ],
                       ),
@@ -665,8 +664,8 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
                 height: 48,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4C6FFF),
-                    foregroundColor: Colors.white,
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: AppColors.textOnAccent,
                   ),
                   onPressed: _submitting || _loadingId ? null : _submit,
                   child: _submitting
@@ -675,7 +674,7 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
                           height: 22,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                           ),
                         )
                       : const Text('Create'),
@@ -691,9 +690,9 @@ class _AddEnvironmentSheetState extends State<_AddEnvironmentSheet> {
   InputDecoration _fieldDeco(String label) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Colors.white54),
+      labelStyle: const TextStyle(color: AppColors.textSecondary),
       filled: true,
-      fillColor: const Color(0xFF151A2E),
+      fillColor: AppColors.surfaceMuted,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
     );
   }
@@ -775,7 +774,7 @@ class _JoinEnvironmentSheetState extends State<_JoinEnvironmentSheet> {
       child: Container(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         decoration: const BoxDecoration(
-          color: Color(0xFF0C1021),
+          color: AppColors.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
@@ -785,7 +784,7 @@ class _JoinEnvironmentSheetState extends State<_JoinEnvironmentSheet> {
             const Text(
               'Join environment',
               style: TextStyle(
-                color: Colors.white,
+                color: AppColors.textPrimary,
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
               ),
@@ -793,22 +792,22 @@ class _JoinEnvironmentSheetState extends State<_JoinEnvironmentSheet> {
             const SizedBox(height: 8),
             const Text(
               'Enter the ID from your environment admin (e.g. H0000001).',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _idCtrl,
               style: const TextStyle(
-                color: Colors.white,
+                color: AppColors.textPrimary,
                 fontFamily: 'monospace',
                 letterSpacing: 0.5,
               ),
               textCapitalization: TextCapitalization.characters,
               decoration: InputDecoration(
                 hintText: 'H0000001',
-                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                hintStyle: TextStyle(color: AppColors.textPrimary.withValues(alpha: 0.3)),
                 filled: true,
-                fillColor: const Color(0xFF151A2E),
+                fillColor: AppColors.surfaceMuted,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
@@ -817,8 +816,8 @@ class _JoinEnvironmentSheetState extends State<_JoinEnvironmentSheet> {
               height: 48,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4C6FFF),
-                  foregroundColor: Colors.white,
+                  backgroundColor: AppColors.accent,
+                  foregroundColor: AppColors.textOnAccent,
                 ),
                 onPressed: _submitting ? null : _submit,
                 child: _submitting
@@ -827,7 +826,7 @@ class _JoinEnvironmentSheetState extends State<_JoinEnvironmentSheet> {
                         height: 22,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: AppColors.textPrimary,
                         ),
                       )
                     : const Text('Send join request'),

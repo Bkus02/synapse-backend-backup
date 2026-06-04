@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/session_service.dart';
 import '../services/user_api.dart';
+import '../theme/app_colors.dart';
 import 'register_screen.dart';
 
 class LoginPage extends StatefulWidget {
@@ -25,11 +26,6 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _showCredentials = false;
   bool _submitting = false;
-
-  static const _fieldBorder = OutlineInputBorder(
-    borderRadius: BorderRadius.all(Radius.circular(12)),
-    borderSide: BorderSide(color: Colors.white24),
-  );
 
   @override
   void initState() {
@@ -60,18 +56,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   InputDecoration _decoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: Colors.white60),
-      floatingLabelStyle: const TextStyle(color: Color(0xFF4C6FFF)),
-      filled: true,
-      fillColor: const Color(0xFF0A1020),
-      border: _fieldBorder,
-      enabledBorder: _fieldBorder,
-      focusedBorder: _fieldBorder.copyWith(
-        borderSide: const BorderSide(color: Color(0xFF4C6FFF), width: 1.5),
-      ),
-    );
+    return InputDecoration(labelText: label);
   }
 
   Future<void> _onSignIn() async {
@@ -97,7 +82,7 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -106,7 +91,7 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Connection error. Is the backend running?'),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -138,14 +123,14 @@ class _LoginPageState extends State<LoginPage> {
                         Icon(
                           Icons.psychology,
                           size: 72,
-                          color: Colors.white.withValues(alpha: 0.95),
+                          color: AppColors.accent,
                         ),
                         const SizedBox(height: 20),
                         Text(
                           'SYNAPSE',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.displaySmall?.copyWith(
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 6,
                             fontSize: 36,
@@ -158,7 +143,7 @@ class _LoginPageState extends State<LoginPage> {
                               : 'How would you like to continue?',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.white54,
+                            color: AppColors.textSecondary,
                           ),
                         ),
                         const SizedBox(height: 32),
@@ -168,12 +153,12 @@ class _LoginPageState extends State<LoginPage> {
                             width: double.infinity,
                             child: OutlinedButton(
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                side: const BorderSide(color: Colors.white24),
+                                foregroundColor: AppColors.textPrimary,
+                                side: const BorderSide(color: AppColors.border),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                backgroundColor: const Color(0xFF050814),
+                                backgroundColor: AppColors.surface,
                               ),
                               onPressed: _openCredentials,
                               child: const Text(
@@ -191,8 +176,8 @@ class _LoginPageState extends State<LoginPage> {
                             width: double.infinity,
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF4C6FFF),
-                                foregroundColor: Colors.white,
+                                backgroundColor: AppColors.accent,
+                                foregroundColor: AppColors.textOnAccent,
                                 elevation: 0,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
@@ -218,7 +203,7 @@ class _LoginPageState extends State<LoginPage> {
                                   controller: _emailCtrl,
                                   keyboardType: TextInputType.emailAddress,
                                   autofillHints: const [AutofillHints.email],
-                                  style: const TextStyle(color: Colors.white),
+                                  style: const TextStyle(color: AppColors.textPrimary),
                                   decoration: _decoration('Email'),
                                   validator: (v) {
                                     if (v == null || v.trim().isEmpty) {
@@ -232,7 +217,7 @@ class _LoginPageState extends State<LoginPage> {
                                   controller: _passwordCtrl,
                                   obscureText: true,
                                   autofillHints: const [AutofillHints.password],
-                                  style: const TextStyle(color: Colors.white),
+                                  style: const TextStyle(color: AppColors.textPrimary),
                                   decoration: _decoration('Password'),
                                   onFieldSubmitted: (_) => _onSignIn(),
                                   validator: (v) {
@@ -259,8 +244,8 @@ class _LoginPageState extends State<LoginPage> {
                                   height: 52,
                                   child: ElevatedButton(
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF4C6FFF),
-                                      foregroundColor: Colors.white,
+                                      backgroundColor: AppColors.accent,
+                                      foregroundColor: AppColors.textOnAccent,
                                       elevation: 0,
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(16),
@@ -273,7 +258,7 @@ class _LoginPageState extends State<LoginPage> {
                                             height: 24,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
-                                              color: Colors.white,
+                                              color: AppColors.textPrimary,
                                             ),
                                           )
                                         : const Text(
@@ -303,7 +288,7 @@ class _LoginPageState extends State<LoginPage> {
                     Text(
                       "Don't have an account? ",
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white54,
+                        color: AppColors.textSecondary,
                       ),
                     ),
                     GestureDetector(
@@ -317,7 +302,7 @@ class _LoginPageState extends State<LoginPage> {
                       child: Text(
                         'Sign up',
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF4C6FFF),
+                          color: AppColors.accent,
                           fontWeight: FontWeight.w600,
                         ),
                       ),

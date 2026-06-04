@@ -1,20 +1,17 @@
 import 'package:flutter/material.dart';
 
-import '../models/recommendation.dart';
+import '../../theme/app_colors.dart';
 import '../services/environment_api.dart';
 import '../services/join_request_inbox.dart';
-import '../services/recommendation_api.dart';
+import '../services/notification_api.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
 
-/// In-app notifications: optional “home tips” (demo) + real join requests with
-/// Approve / Reject and a shortcut to the environment approval screen.
+/// In-app notifications: the persistent backend feed (morning greeting,
+/// device routine confirms, advice reminders, streak milestones, sequence
+/// triggers) PLUS real environment join requests with Approve / Reject.
 class NotificationsModal {
   NotificationsModal._();
-
-  static const _sheetColor = Color(0xFF0C1021);
-  static const _cardColor = Color(0xFF1E2330);
-  static const _accent = Color(0xFF4C6FFF);
 
   static Future<void> show(
     BuildContext context, {
@@ -25,12 +22,12 @@ class NotificationsModal {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
+      barrierColor: AppColors.modalBarrier,
       builder: (sheetContext) {
         return _NotificationsSheet(
-          sheetColor: _sheetColor,
-          cardColor: _cardColor,
-          accent: _accent,
+          sheetColor: AppColors.surface,
+          cardColor: AppColors.surfaceMuted,
+          accent: AppColors.accent,
           onNavigateToEnvironmentApprovals: (envId) {
             Navigator.pop(sheetContext);
             onNavigateToEnvironmentApprovals(envId);
@@ -59,104 +56,99 @@ class _NotificationsSheet extends StatefulWidget {
 }
 
 class _NotificationsSheetState extends State<_NotificationsSheet> {
-  static String _timeLabel(String? iso) {
-    if (iso == null || iso.isEmpty) return 'Pending';
-    try {
-      final dt = DateTime.parse(iso);
-      final diff = DateTime.now().difference(dt);
-      if (diff.inMinutes < 1) return 'Just now';
-      if (diff.inHours < 1) return '${diff.inMinutes} min ago';
-      if (diff.inDays < 1) return '${diff.inHours} hr ago';
-      if (diff.inDays < 7) return '${diff.inDays} d ago';
-      return '${(diff.inDays / 7).floor()} wk ago';
-    } catch (_) {
-      return 'Pending';
+  static String _timeLabel(DateTime? dt) {
+    if (dt == null) return 'Pending';
+    final local = dt.toLocal();
+    final diff = DateTime.now().difference(local);
+    if (diff.isNegative) {
+      final hh = local.hour.toString().padLeft(2, '0');
+      final mm = local.minute.toString().padLeft(2, '0');
+      return 'at $hh:$mm';
     }
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes} min ago';
+    if (diff.inDays < 1) return '${diff.inHours} hr ago';
+    if (diff.inDays < 7) return '${diff.inDays} d ago';
+    return '${(diff.inDays / 7).floor()} wk ago';
   }
 
+  // Real backend feed.
+  List<AppNotification> _notifications = [];
+  bool _loadingFeed = true;
+  String? _feedError;
+  final Set<int> _busyNotificationIds = {};
+
+  // Join requests (unchanged).
   List<JoinRequestInboxItem> _joinItems = [];
   bool _loadingJoin = true;
   String? _joinError;
-
-  Recommendation? _activeRecommendation;
-  bool _loadingRecommendation = false;
-  bool _actingOnRecommendation = false;
-
-  final List<_TipEntry> _tips = [
-    _TipEntry(
-      icon: Icons.lightbulb,
-      title: 'Energy Saving Mode',
-      message:
-          'Living room lights were dimmed by 20% based on your habits.',
-      timeAgo: '2 min ago',
-    ),
-    _TipEntry(
-      icon: Icons.ac_unit,
-      title: 'Cooling Schedule',
-      message:
-          'AC was set to 22°C in the lounge based on your evening routine.',
-      timeAgo: '18 min ago',
-    ),
-    _TipEntry(
-      icon: Icons.lightbulb,
-      title: 'Bedroom Lights',
-      message: 'Bedroom lights were switched to night mode.',
-      timeAgo: '1 hr ago',
-    ),
-  ];
-
-  final Set<int> _busyRequestIds = {};
+  final Set<int> _busyJoinIds = {};
 
   @override
   void initState() {
     super.initState();
+    _loadFeed();
     _loadJoin();
-    _loadRecommendation();
   }
 
-  Future<void> _loadRecommendation() async {
-    final uid = SessionService.instance.user?['id'] as String?;
-    if (uid == null || !SessionService.instance.hasToken) {
+  // ---------------------------------------------------------------- feed
+
+  Future<void> _loadFeed() async {
+    if (!SessionService.instance.hasToken) {
       if (mounted) {
         setState(() {
-          _activeRecommendation = null;
-          _loadingRecommendation = false;
+          _notifications = [];
+          _loadingFeed = false;
         });
       }
       return;
     }
-    setState(() => _loadingRecommendation = true);
+    setState(() {
+      _loadingFeed = true;
+      _feedError = null;
+    });
     try {
-      final rec = await RecommendationApi.getActive(userId: uid);
+      final feed = await NotificationApi.feed(limit: 60);
       if (mounted) {
         setState(() {
-          _activeRecommendation = rec;
-          _loadingRecommendation = false;
+          _notifications = feed;
+          _loadingFeed = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loadingRecommendation = false);
+    } on UserApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _feedError = e.message;
+          _loadingFeed = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _feedError = e.toString();
+          _loadingFeed = false;
+        });
+      }
     }
   }
 
-  Future<void> _respondToRecommendation(bool accept) async {
-    final rec = _activeRecommendation;
-    if (rec == null || _actingOnRecommendation) return;
-    setState(() => _actingOnRecommendation = true);
+  Future<void> _confirmNotification(AppNotification n) async {
+    if (_busyNotificationIds.contains(n.id)) return;
+    setState(() => _busyNotificationIds.add(n.id));
     try {
-      if (accept) {
-        await RecommendationApi.accept(rec.id);
-      } else {
-        await RecommendationApi.reject(rec.id);
-      }
+      final updated = await NotificationApi.confirm(n.id);
       if (mounted) {
+        setState(() {
+          _notifications = _notifications
+              .map((item) => item.id == updated.id ? updated : item)
+              .toList();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(accept ? 'Suggestion accepted' : 'Suggestion dismissed'),
+            content: Text('Confirmed: ${n.title}'),
             behavior: SnackBarBehavior.floating,
           ),
         );
-        await _loadRecommendation();
       }
     } on UserApiException catch (e) {
       if (mounted) {
@@ -169,9 +161,63 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         );
       }
     } finally {
-      if (mounted) setState(() => _actingOnRecommendation = false);
+      if (mounted) setState(() => _busyNotificationIds.remove(n.id));
     }
   }
+
+  Future<void> _dismissNotification(AppNotification n) async {
+    if (_busyNotificationIds.contains(n.id)) return;
+    setState(() => _busyNotificationIds.add(n.id));
+    try {
+      final updated = await NotificationApi.dismiss(n.id);
+      if (mounted) {
+        setState(() {
+          _notifications = _notifications
+              .map((item) => item.id == updated.id ? updated : item)
+              .toList();
+        });
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busyNotificationIds.remove(n.id));
+    }
+  }
+
+  Future<void> _runDay31Simulation() async {
+    try {
+      await NotificationApi.seedToday();
+      await _loadFeed();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Today's notifications generated."),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  // ----------------------------------------------------------- join requests
 
   Future<void> _loadJoin() async {
     setState(() {
@@ -196,10 +242,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
     }
   }
 
-  Future<void> _approve(JoinRequestInboxItem item) async {
+  Future<void> _approveJoin(JoinRequestInboxItem item) async {
     final uid = SessionService.instance.user?['id'] as String?;
     if (uid == null) return;
-    setState(() => _busyRequestIds.add(item.request.id));
+    setState(() => _busyJoinIds.add(item.request.id));
     try {
       await EnvironmentApi.approveJoinRequest(
         environmentId: item.environment.id,
@@ -226,16 +272,14 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _busyRequestIds.remove(item.request.id));
-      }
+      if (mounted) setState(() => _busyJoinIds.remove(item.request.id));
     }
   }
 
-  Future<void> _reject(JoinRequestInboxItem item) async {
+  Future<void> _rejectJoin(JoinRequestInboxItem item) async {
     final uid = SessionService.instance.user?['id'] as String?;
     if (uid == null) return;
-    setState(() => _busyRequestIds.add(item.request.id));
+    setState(() => _busyJoinIds.add(item.request.id));
     try {
       await EnvironmentApi.rejectJoinRequest(
         environmentId: item.environment.id,
@@ -262,16 +306,103 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _busyRequestIds.remove(item.request.id));
-      }
+      if (mounted) setState(() => _busyJoinIds.remove(item.request.id));
     }
   }
+
+  // -------------------------------------------------------------- helpers
+
+  IconData _iconForKind(String kind) {
+    switch (kind) {
+      case 'morning_greeting':
+        return Icons.wb_sunny_rounded;
+      case 'advice_reminder':
+        return Icons.directions_run_rounded;
+      case 'device_routine':
+        return Icons.tune_rounded;
+      case 'sequence_trigger':
+        return Icons.bolt_rounded;
+      case 'streak_milestone':
+        return Icons.local_fire_department_rounded;
+      case 'safety_anomaly':
+        return Icons.warning_amber_rounded;
+      default:
+        return Icons.notifications_rounded;
+    }
+  }
+
+  Color _accentForKind(String kind) {
+    if (kind == 'safety_anomaly') {
+      return const Color(0xFFFF5252);
+    }
+    return widget.accent;
+  }
+
+  String _sectionHeaderForKind(String kind) {
+    switch (kind) {
+      case 'safety_anomaly':
+        return 'Safety alerts';
+      case 'morning_greeting':
+        return 'Daily';
+      case 'advice_reminder':
+        return 'Positive advice';
+      case 'device_routine':
+      case 'sequence_trigger':
+        return 'Device habits';
+      case 'streak_milestone':
+        return 'Milestones';
+      default:
+        return 'Other';
+    }
+  }
+
+  String _confirmLabelForKind(String kind) {
+    switch (kind) {
+      case 'advice_reminder':
+        return "I'm starting";
+      case 'device_routine':
+      case 'sequence_trigger':
+        return 'Confirm';
+      default:
+        return 'OK';
+    }
+  }
+
+  String _dismissLabelForKind(String kind) {
+    switch (kind) {
+      case 'advice_reminder':
+        return 'Skip';
+      default:
+        return 'Not now';
+    }
+  }
+
+  // ---------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final sheetHeight = media.size.height * 0.87;
+
+    final visible = _notifications
+        .where((n) => n.status != 'expired')
+        .toList();
+
+    // Group by section header
+    final grouped = <String, List<AppNotification>>{};
+    for (final n in visible) {
+      grouped
+          .putIfAbsent(_sectionHeaderForKind(n.kind), () => [])
+          .add(n);
+    }
+    const sectionOrder = [
+      'Safety alerts',
+      'Daily',
+      'Positive advice',
+      'Device habits',
+      'Milestones',
+      'Other',
+    ];
 
     return Padding(
       padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
@@ -296,7 +427,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           width: 40,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.28),
+                            color: AppColors.textPrimary.withValues(alpha: 0.28),
                             borderRadius: BorderRadius.circular(999),
                           ),
                         ),
@@ -305,15 +436,21 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           child: Text(
                             'Notifications',
                             style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  color: Colors.white,
+                                  color: AppColors.textPrimary,
                                   fontWeight: FontWeight.w700,
                                 ),
                           ),
                         ),
                         IconButton(
+                          onPressed: _runDay31Simulation,
+                          icon: const Icon(Icons.science_outlined),
+                          color: widget.accent,
+                          tooltip: 'Simulate today (day 31)',
+                        ),
+                        IconButton(
                           onPressed: () {
+                            _loadFeed();
                             _loadJoin();
-                            _loadRecommendation();
                           },
                           icon: const Icon(Icons.refresh_rounded),
                           color: widget.accent,
@@ -326,128 +463,59 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     child: ListView(
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Text(
-                            'Synapse suggestions',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleSmall
-                                ?.copyWith(
-                                  color: Colors.white70,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        if (_loadingRecommendation)
+                        if (_loadingFeed)
                           const Padding(
                             padding: EdgeInsets.all(20),
                             child: Center(
                               child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
-                        else if (_activeRecommendation == null)
+                        else if (_feedError != null)
                           Padding(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                             child: Text(
+                              _feedError!,
+                              style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 13,
+                              ),
+                            ),
+                          )
+                        else if (visible.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                            child: Text(
                               SessionService.instance.user == null
-                                  ? 'Sign in to see AI habit suggestions.'
-                                  : 'No active suggestions right now.',
+                                  ? 'Sign in to see your notifications.'
+                                  : "Nothing for today yet. Tap the flask above to simulate today's notifications.",
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.45),
+                                color: AppColors.textPrimary.withValues(alpha: 0.45),
                                 fontSize: 14,
                               ),
                             ),
                           )
                         else
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-                            child: Card(
-                              color: widget.cardColor,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
+                          ...sectionOrder
+                              .where((s) => grouped[s] != null)
+                              .expand((s) sync* {
+                            yield Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
+                              child: Text(
+                                s,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                               ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(14),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.auto_awesome,
-                                          color: widget.accent,
-                                          size: 26,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            _activeRecommendation!.headline,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      _activeRecommendation!.body,
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(alpha: 0.72),
-                                        fontSize: 14,
-                                        height: 1.35,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: OutlinedButton(
-                                            onPressed: _actingOnRecommendation
-                                                ? null
-                                                : () => _respondToRecommendation(false),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.white70,
-                                              side: const BorderSide(
-                                                color: Colors.white24,
-                                              ),
-                                            ),
-                                            child: const Text('Dismiss'),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: FilledButton(
-                                            onPressed: _actingOnRecommendation
-                                                ? null
-                                                : () => _respondToRecommendation(true),
-                                            style: FilledButton.styleFrom(
-                                              backgroundColor: widget.accent,
-                                            ),
-                                            child: _actingOnRecommendation
-                                                ? const SizedBox(
-                                                    height: 18,
-                                                    width: 18,
-                                                    child: CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                      color: Colors.white,
-                                                    ),
-                                                  )
-                                                : const Text('Accept'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
+                            );
+                            for (final n in grouped[s]!) {
+                              yield _notificationCard(n);
+                            }
+                          }),
+                        const SizedBox(height: 14),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Text(
@@ -456,7 +524,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                 .textTheme
                                 .titleSmall
                                 ?.copyWith(
-                                  color: Colors.white70,
+                                  color: AppColors.textSecondary,
                                   fontWeight: FontWeight.w700,
                                 ),
                           ),
@@ -488,256 +556,13 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                   ? 'Sign in to see join requests for environments you manage.'
                                   : 'No pending join requests.',
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.45),
+                                color: AppColors.textPrimary.withValues(alpha: 0.45),
                                 fontSize: 14,
                               ),
                             ),
                           )
                         else
-                          ..._joinItems.map((item) {
-                            final busy =
-                                _busyRequestIds.contains(item.request.id);
-                            final who = item.request.requesterName
-                                        ?.trim()
-                                        .isNotEmpty ==
-                                    true
-                                ? item.request.requesterName!.trim()
-                                : item.request.userId;
-                            return Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-                              child: Card(
-                                color: widget.cardColor,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(14),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Icon(
-                                            Icons.person_add_alt_1_rounded,
-                                            color: widget.accent,
-                                            size: 26,
-                                          ),
-                                          const SizedBox(width: 10),
-                                          const Expanded(
-                                            child: Text(
-                                              'Someone wants to join',
-                                              style: TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '$who asked to join "${item.environment.name}" (${item.environment.id}).',
-                                        style: TextStyle(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.72),
-                                          fontSize: 14,
-                                          height: 1.35,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Text(
-                                        _timeLabel(item.request.createdAt),
-                                        style: TextStyle(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.45),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: OutlinedButton(
-                                              onPressed: busy
-                                                  ? null
-                                                  : () => _reject(item),
-                                              style: OutlinedButton.styleFrom(
-                                                foregroundColor: Colors.white70,
-                                                side: const BorderSide(
-                                                  color: Colors.white24,
-                                                ),
-                                              ),
-                                              child: const Text('Reject'),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: FilledButton(
-                                              onPressed: busy
-                                                  ? null
-                                                  : () => _approve(item),
-                                              style: FilledButton.styleFrom(
-                                                backgroundColor: widget.accent,
-                                              ),
-                                              child: busy
-                                                  ? const SizedBox(
-                                                      height: 18,
-                                                      width: 18,
-                                                      child:
-                                                          CircularProgressIndicator(
-                                                        strokeWidth: 2,
-                                                        color: Colors.white,
-                                                      ),
-                                                    )
-                                                  : const Text('Approve'),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: TextButton(
-                                          onPressed: busy
-                                              ? null
-                                              : () => widget
-                                                  .onNavigateToEnvironmentApprovals(
-                                                  item.environment.id,
-                                                ),
-                                          child: Text(
-                                            'Open in Environments',
-                                            style: TextStyle(
-                                              color: widget.accent,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                          child: Row(
-                            children: [
-                              Text(
-                                'Home insights',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(
-                                      color: Colors.white70,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: () => setState(_tips.clear),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: widget.accent,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                ),
-                                child: const Text(
-                                  'Clear all',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (_tips.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: Text(
-                              'No insight notifications',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.45),
-                                fontSize: 15,
-                              ),
-                            ),
-                          )
-                        else
-                          ..._tips.map((n) {
-                            return Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                              child: Card(
-                                color: widget.cardColor,
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Icon(
-                                            n.icon,
-                                            color: widget.accent,
-                                            size: 26,
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              n.title,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Text(
-                                        n.message,
-                                        style: TextStyle(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.72),
-                                          fontSize: 14,
-                                          height: 1.35,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Align(
-                                        alignment: Alignment.bottomRight,
-                                        child: Text(
-                                          n.timeAgo,
-                                          style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.45),
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
+                          ..._joinItems.map(_joinCard),
                       ],
                     ),
                   ),
@@ -749,18 +574,245 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       ),
     );
   }
-}
 
-class _TipEntry {
-  _TipEntry({
-    required this.icon,
-    required this.title,
-    required this.message,
-    required this.timeAgo,
-  });
+  Widget _notificationCard(AppNotification n) {
+    final busy = _busyNotificationIds.contains(n.id);
+    final closed = n.isClosed;
+    final closedHint = n.status == 'confirmed'
+        ? 'Confirmed'
+        : (n.status == 'dismissed' ? 'Dismissed' : null);
+    final cardAccent = _accentForKind(n.kind);
+    final isAlert = n.kind == 'safety_anomaly';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Card(
+        color: widget.cardColor,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: isAlert
+              ? BorderSide(color: cardAccent.withValues(alpha: 0.75), width: 1.4)
+              : BorderSide.none,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(_iconForKind(n.kind), color: cardAccent, size: 26),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      n.title,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                n.body,
+                style: TextStyle(
+                  color: AppColors.textPrimary.withValues(alpha: 0.72),
+                  fontSize: 14,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Text(
+                    _timeLabel(n.firedAt ?? n.scheduledFor),
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (closedHint != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        closedHint,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              if (n.requiresAction && !closed) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: busy ? null : () => _dismissNotification(n),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.textSecondary,
+                          side: const BorderSide(color: AppColors.border),
+                        ),
+                        child: Text(_dismissLabelForKind(n.kind)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: busy ? null : () => _confirmNotification(n),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: widget.accent,
+                        ),
+                        child: busy
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.textPrimary,
+                                ),
+                              )
+                            : Text(_confirmLabelForKind(n.kind)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-  final IconData icon;
-  final String title;
-  final String message;
-  final String timeAgo;
+  Widget _joinCard(JoinRequestInboxItem item) {
+    final busy = _busyJoinIds.contains(item.request.id);
+    final who = (item.request.requesterName?.trim().isNotEmpty ?? false)
+        ? item.request.requesterName!.trim()
+        : item.request.userId;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Card(
+        color: widget.cardColor,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.person_add_alt_1_rounded,
+                    color: widget.accent,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Someone wants to join',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$who asked to join "${item.environment.name}" (${item.environment.id}).',
+                style: TextStyle(
+                  color: AppColors.textPrimary.withValues(alpha: 0.72),
+                  fontSize: 14,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _timeLabel(DateTime.tryParse(item.request.createdAt ?? '')),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: busy ? null : () => _rejectJoin(item),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary,
+                        side: const BorderSide(color: AppColors.border),
+                      ),
+                      child: const Text('Reject'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: busy ? null : () => _approveJoin(item),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: widget.accent,
+                      ),
+                      child: busy
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.textPrimary,
+                              ),
+                            )
+                          : const Text('Approve'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => widget.onNavigateToEnvironmentApprovals(
+                            item.environment.id,
+                          ),
+                  child: Text(
+                    'Open in Environments',
+                    style: TextStyle(
+                      color: widget.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

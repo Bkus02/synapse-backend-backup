@@ -9,6 +9,33 @@ enum EnvironmentDeviceType {
   other,
 }
 
+/// Finer-grained control kind derived from `type` + `name`.
+///
+/// `devices.type` only has 5 buckets (Lamp/Thermostat/Plug/Sensor/Other), so
+/// kitchen plugs like Fırın / Bulaşık / Çamaşır all collapse into "plug".
+/// We sniff the user-facing name to surface the right control widgets:
+///
+///   - lamp        → on/off + brightness slider
+///   - ac          → on/off + temperature slider (16–30 °C)
+///   - thermostat  → on/off + temperature slider (16–30 °C)
+///   - oven        → on/off + temperature (50–250 °C) + duration timer
+///   - dishwasher  → on/off + program picker + remaining time
+///   - washer      → on/off + program picker + remaining time
+///   - plug        → on/off only
+///   - sensor      → read-only value
+///   - other       → on/off only
+enum DeviceControlKind {
+  lamp,
+  ac,
+  thermostat,
+  oven,
+  dishwasher,
+  washer,
+  plug,
+  sensor,
+  other,
+}
+
 extension EnvironmentDeviceTypeX on EnvironmentDeviceType {
   String get categoryTitle => switch (this) {
         EnvironmentDeviceType.lamp => 'Lamp',
@@ -94,6 +121,32 @@ class EnvironmentDevice {
       status: status ?? this.status,
       currentValue: currentValue ?? this.currentValue,
     );
+  }
+
+  /// Sniff a finer control kind from `type` and the user-facing name.
+  DeviceControlKind get controlKind {
+    final lower = name.toLowerCase();
+    bool has(Iterable<String> needles) =>
+        needles.any((n) => lower.contains(n));
+
+    if (has(const ['firin', 'fırın', 'oven'])) return DeviceControlKind.oven;
+    if (has(const ['bulasik', 'bulaşık', 'dishwasher'])) {
+      return DeviceControlKind.dishwasher;
+    }
+    if (has(const ['camasir', 'çamaşır', 'washing', 'washer'])) {
+      return DeviceControlKind.washer;
+    }
+    if (has(const ['klima', ' ac', 'air condition', 'condition'])) {
+      return DeviceControlKind.ac;
+    }
+
+    return switch (type) {
+      EnvironmentDeviceType.lamp => DeviceControlKind.lamp,
+      EnvironmentDeviceType.thermostat => DeviceControlKind.thermostat,
+      EnvironmentDeviceType.plug => DeviceControlKind.plug,
+      EnvironmentDeviceType.sensor => DeviceControlKind.sensor,
+      EnvironmentDeviceType.other => DeviceControlKind.other,
+    };
   }
 
   factory EnvironmentDevice.fromJson(Map<String, dynamic> json) {

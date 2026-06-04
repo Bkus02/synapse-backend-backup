@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_colors.dart';
 import 'package:flutter/services.dart';
 
 import '../services/selected_environment_service.dart';
@@ -10,8 +11,7 @@ import '../utils/environment_visuals.dart';
 class ProfileModal {
   ProfileModal._();
 
-  static const _sheetColor = Color(0xFF0C1021);
-
+  
   static void show(BuildContext context) {
     final heightFraction = 0.9;
     final topRadius = 25.0;
@@ -20,7 +20,7 @@ class ProfileModal {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
+      barrierColor: AppColors.modalBarrier,
       builder: (sheetContext) {
         final media = MediaQuery.of(sheetContext);
         final sheetHeight = media.size.height * heightFraction;
@@ -33,7 +33,7 @@ class ProfileModal {
               borderRadius:
                   BorderRadius.vertical(top: Radius.circular(topRadius)),
               child: Material(
-                color: _sheetColor,
+                color: AppColors.surface,
                 child: SizedBox(
                   height: sheetHeight,
                   width: double.infinity,
@@ -112,17 +112,17 @@ class _ProfileSheetState extends State<_ProfileSheet> {
   InputDecoration _decoration(String label) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Colors.white54),
+      labelStyle: const TextStyle(color: AppColors.textSecondary),
       filled: true,
-      fillColor: const Color(0xFF151A2E),
+      fillColor: AppColors.surfaceMuted,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Colors.white24),
+        borderSide: const BorderSide(color: AppColors.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF4C6FFF)),
+        borderSide: const BorderSide(color: AppColors.accent),
       ),
     );
   }
@@ -215,7 +215,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 child: Text(
                   'Sign up first to set up your profile.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
                 ),
               ),
             ),
@@ -239,7 +239,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
         Text(
           'Profile',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white,
+                color: AppColors.textPrimary,
                 fontWeight: FontWeight.w700,
               ),
         ),
@@ -253,7 +253,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 Text(
                   'Profile picture',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.55),
+                    color: AppColors.textPrimary.withValues(alpha: 0.55),
                     fontSize: 12,
                   ),
                 ),
@@ -270,18 +270,18 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           color: sel
-                              ? const Color(0xFF4C6FFF).withValues(alpha: 0.25)
-                              : const Color(0xFF151A2E),
+                              ? AppColors.accent.withValues(alpha: 0.25)
+                              : AppColors.surfaceMuted,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: sel
-                                ? const Color(0xFF4C6FFF)
-                                : Colors.white12,
+                                ? AppColors.accent
+                                : AppColors.border,
                           ),
                         ),
                         child: Icon(
                           userAvatarIconForKey(e.key) ?? Icons.person,
-                          color: Colors.white70,
+                          color: AppColors.textSecondary,
                         ),
                       ),
                     );
@@ -290,7 +290,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _nameCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: AppColors.textPrimary),
                   decoration: _decoration('Full name'),
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Required' : null,
@@ -298,7 +298,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _emailCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: AppColors.textPrimary),
                   keyboardType: TextInputType.emailAddress,
                   decoration: _decoration('Email'),
                   validator: (v) =>
@@ -307,7 +307,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _passwordCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: AppColors.textPrimary),
                   obscureText: true,
                   decoration: _decoration('New password (optional)'),
                 ),
@@ -317,7 +317,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                     Expanded(
                       child: TextFormField(
                         controller: _heightCtrl,
-                        style: const TextStyle(color: Colors.white),
+                        style: const TextStyle(color: AppColors.textPrimary),
                         keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
@@ -333,7 +333,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                     Expanded(
                       child: TextFormField(
                         controller: _weightCtrl,
-                        style: const TextStyle(color: Colors.white),
+                        style: const TextStyle(color: AppColors.textPrimary),
                         keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
@@ -350,7 +350,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _ageCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: AppColors.textPrimary),
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: _decoration('Age'),
@@ -360,7 +360,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _locationCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: AppColors.textPrimary),
                   decoration: _decoration('Location'),
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Required' : null,
@@ -371,8 +371,8 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                   width: double.infinity,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4C6FFF),
-                      foregroundColor: Colors.white,
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: AppColors.textOnAccent,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -384,7 +384,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                             height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: AppColors.textPrimary,
                             ),
                           )
                         : const Text(
@@ -399,8 +399,8 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                   width: double.infinity,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFD32F2F),
-                      foregroundColor: Colors.white,
+                      backgroundColor: AppColors.error,
+                      foregroundColor: AppColors.textOnAccent,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -426,7 +426,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
         width: 40,
         height: 4,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.28),
+          color: AppColors.textPrimary.withValues(alpha: 0.28),
           borderRadius: BorderRadius.circular(999),
         ),
       ),

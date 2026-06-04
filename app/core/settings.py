@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
     jwt_access_token_expire_minutes: int = Field(default=60 * 24, ge=1)
 
+    # --- Tuya / Smart Life (cloud lamp) --------------------------------------
+    tuya_access_id: str = ""
+    tuya_access_secret: str = ""
+    tuya_device_id: str = ""
+    # EU project: https://openapi.tuyaeu.com | US: https://openapi.tuyaus.com
+    tuya_api_endpoint: str = "https://openapi.tuyaeu.com"
+
     @property
     def cors_origin_list(self) -> list[str]:
         if not self.cors_origins.strip():

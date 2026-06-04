@@ -14,9 +14,16 @@ from app.api.routes.behavior_logs import router as behavior_logs_router
 from app.api.routes.devices import router as devices_router
 from app.api.routes.environments import router as environments_router
 from app.api.routes.habits import router as habits_router
+from app.api.routes.notifications import (
+    router as notifications_router,
+    schedule_router as advice_schedules_router,
+)
+from app.api.routes.positive_advice_logs import router as positive_advice_logs_router
 from app.api.routes.recommendations import router as recommendations_router
+from app.api.routes.tuya_lamp import router as tuya_lamp_router
 from app.api.routes.users import router as users_router
-from app.application.services import smart_home_service
+from app.api.routes.weather import router as weather_router
+from app.application.services import positive_advice_service, smart_home_service
 from app.core.logging_config import configure_logging
 from app.core.settings import settings
 from app.db.database import engine
@@ -30,6 +37,10 @@ async def lifespan(_: FastAPI):
     # Uygulama açılırken veritabanına bağlanabildiğimizi doğrula.
     with Session(engine) as session:
         session.exec(text("SELECT 1"))
+        try:
+            positive_advice_service.seed_advice_catalog(session)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("positive advice catalog seed atlandı: %s", exc)
     stop_event = asyncio.Event()
 
     async def _habit_matrix_scheduler() -> None:
@@ -115,3 +126,8 @@ app.include_router(devices_router)
 app.include_router(behavior_logs_router)
 app.include_router(habits_router)
 app.include_router(recommendations_router)
+app.include_router(tuya_lamp_router)
+app.include_router(weather_router)
+app.include_router(positive_advice_logs_router)
+app.include_router(notifications_router)
+app.include_router(advice_schedules_router)

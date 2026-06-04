@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
 from app.api.deps import current_user_id
-from app.api.schemas import DeviceCreate
+from app.api.schemas import DeviceCreate, DeviceUpdate
 from app.application.services import smart_home_service
 from app.core.models import Device
 from app.db.database import get_session
@@ -33,6 +33,16 @@ def create_device(
     session: Session = Depends(get_session),
 ) -> Device:
     return smart_home_service.create_device_authenticated(payload, user_id, session)
+
+
+@router.patch("/{device_id}", response_model=Device)
+def patch_device(
+    device_id: int,
+    payload: DeviceUpdate,
+    user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> Device:
+    return smart_home_service.patch_device(device_id, user_id, payload, session)
 
 
 @router.delete("/{device_id}")

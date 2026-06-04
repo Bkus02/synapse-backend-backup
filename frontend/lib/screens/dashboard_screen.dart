@@ -2,18 +2,25 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
 import '../models/advice_detail_data.dart';
 import '../models/daily_activity.dart';
 import '../models/environment_summary.dart';
 import '../models/habit.dart';
 import '../models/recommendation.dart' as api;
 import '../services/environment_api.dart';
+import '../services/environment_streak_api.dart';
 import '../services/habit_api.dart';
 import '../services/join_request_inbox.dart';
+import '../services/notification_api.dart';
+import '../services/personalized_advice_api.dart';
 import '../services/recommendation_api.dart';
 import '../services/selected_environment_service.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
+import '../services/weather_api.dart';
+import '../utils/material_icon_lookup.dart';
+import '../widgets/istanbul_clock.dart';
 import '../widgets/notifications_modal.dart';
 import '../widgets/profile_modal.dart';
 import '../widgets/streak_gene_widget.dart';
@@ -26,18 +33,21 @@ const _kAdviceItems = [
     summary:
         'Wind down with a focused session; Synapse aligns lighting with your routine.',
     icon: Icons.menu_book,
+    adviceKey: 'reading_time',
   ),
   AdviceDetailData(
     title: 'Fruit Break',
     summary:
         'Add one portion of fruit to your evening routine for a steady energy curve.',
     icon: Icons.restaurant_rounded,
+    adviceKey: 'fruit_break',
   ),
   AdviceDetailData(
     title: 'Light Walk',
     summary:
         'Short movement breaks help circulation; your home can support the habit.',
     icon: Icons.directions_walk,
+    adviceKey: 'light_walk',
   ),
 ];
 
@@ -74,10 +84,8 @@ class _DashboardPageState extends State<DashboardPage> {
     var count = 0;
     try {
       count += await JoinRequestInbox.pendingCountForAdmin();
-      final uid = SessionService.instance.user?['id'] as String?;
-      if (uid != null && SessionService.instance.hasToken) {
-        final rec = await RecommendationApi.getActive(userId: uid);
-        if (rec != null) count += 1;
+      if (SessionService.instance.hasToken) {
+        count += await NotificationApi.badge();
       }
     } catch (_) {
       // Badge is best-effort; ignore transient API errors.
@@ -93,6 +101,7 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(
         title: const Text('Synapse'),
         actions: [
+          const IstanbulClock(),
           Stack(
             clipBehavior: Clip.none,
             children: [
@@ -148,9 +157,9 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: const Color(0xFF050814),
-        selectedItemColor: const Color(0xFF4C6FFF),
-        unselectedItemColor: Colors.white54,
+        backgroundColor: AppColors.surface,
+        selectedItemColor: AppColors.accent,
+        unselectedItemColor: AppColors.textSecondary,
         currentIndex: _selectedIndex,
         onTap: (index) {
           setState(() => _selectedIndex = index);
@@ -202,7 +211,9 @@ class _MainPageState extends State<MainPage> {
   Timer? _recommendationPoll;
 
   int _geneProgressStep = 0;
-  DateTime? _lastMarkedDate;
+
+  PersonalizedAdviceBundle? _adviceBundle;
+  bool _loadingAdvices = false;
 
   @override
   void initState() {
@@ -211,10 +222,31 @@ class _MainPageState extends State<MainPage> {
     SelectedEnvironmentService.instance.addListener(_onEnvironmentSelection);
     _loadEnvironmentFamily();
     _pollRecommendation();
+    _loadPersonalizedAdvices();
     _recommendationPoll = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _pollRecommendation(),
     );
+  }
+
+  Future<void> _loadPersonalizedAdvices() async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null || !SessionService.instance.hasToken) {
+      if (mounted) setState(() => _adviceBundle = null);
+      return;
+    }
+    if (mounted) setState(() => _loadingAdvices = true);
+    try {
+      final bundle = await PersonalizedAdviceApi.fetch(uid);
+      if (mounted) {
+        setState(() {
+          _adviceBundle = bundle;
+          _loadingAdvices = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingAdvices = false);
+    }
   }
 
   @override
@@ -229,6 +261,7 @@ class _MainPageState extends State<MainPage> {
     if (mounted) {
       _loadEnvironmentFamily();
       _pollRecommendation();
+      _loadPersonalizedAdvices();
     }
   }
 
@@ -339,8 +372,18 @@ class _MainPageState extends State<MainPage> {
         await SelectedEnvironmentService.instance.setSelected(envId);
       }
       final env = envs.firstWhere((e) => e.id == envId);
-      final members = await EnvironmentApi.listMembers(envId);
       final myId = uid;
+
+      List<EnvironmentStreakEntry> topStreaks = const [];
+      try {
+        topStreaks = await EnvironmentStreakApi.top(
+          environmentId: envId,
+          days: _daysToShow,
+          limit: 3,
+        );
+      } catch (_) {
+        // Streak feed is best-effort; fall back to members API below.
+      }
 
       DailyActivityLog? myActivity;
       try {
@@ -361,22 +404,48 @@ class _MainPageState extends State<MainPage> {
       }
 
       final family = <_FamilyMemberProgress>[];
-      for (final m in members) {
-        final name = m.fullName?.trim().isNotEmpty == true
-            ? m.fullName!.trim()
-            : m.userId;
-        final isMe = m.userId == myId;
-        family.add(
-          _FamilyMemberProgress(
-            userId: m.userId,
-            name: name,
-            environmentId: envId,
-            dailyAdviceLog: isMe && myActivity != null
-                ? myActivity.activeFlags
-                : List<bool>.filled(_daysToShow, false),
-            isCurrentUser: isMe,
-          ),
-        );
+      if (topStreaks.isNotEmpty) {
+        for (final entry in topStreaks) {
+          final name = entry.fullName?.trim().isNotEmpty == true
+              ? entry.fullName!.trim()
+              : entry.userId;
+          final isMe = entry.userId == myId;
+          final flags = entry.dailyAdviceLog.isEmpty
+              ? List<bool>.filled(_daysToShow, false)
+              : entry.dailyAdviceLog;
+          family.add(
+            _FamilyMemberProgress(
+              userId: entry.userId,
+              name: name,
+              environmentId: envId,
+              dailyAdviceLog: List<bool>.of(flags),
+              isCurrentUser: isMe,
+            ),
+          );
+        }
+      } else {
+        // Fallback: best-effort members fetch when streaks endpoint fails.
+        final members = await EnvironmentApi.listMembers(envId);
+        for (final m in members) {
+          final name = m.fullName?.trim().isNotEmpty == true
+              ? m.fullName!.trim()
+              : m.userId;
+          final isMe = m.userId == myId;
+          family.add(
+            _FamilyMemberProgress(
+              userId: m.userId,
+              name: name,
+              environmentId: envId,
+              dailyAdviceLog: isMe && myActivity != null
+                  ? myActivity.activeFlags
+                  : List<bool>.filled(_daysToShow, false),
+              isCurrentUser: isMe,
+            ),
+          );
+        }
+        if (family.length > 3) {
+          family.removeRange(3, family.length);
+        }
       }
 
       if (mounted) {
@@ -406,7 +475,7 @@ class _MainPageState extends State<MainPage> {
     if (_environments.length < 2) return;
     final picked = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: const Color(0xFF0C1021),
+      backgroundColor: AppColors.surface,
       builder: (ctx) {
         return SafeArea(
           child: Column(
@@ -417,7 +486,7 @@ class _MainPageState extends State<MainPage> {
                 child: Text(
                   'Select home environment',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: AppColors.textPrimary,
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
                   ),
@@ -425,13 +494,16 @@ class _MainPageState extends State<MainPage> {
               ),
               ..._environments.map((env) {
                 return ListTile(
-                  title: Text(env.name, style: const TextStyle(color: Colors.white)),
+                  title: Text(
+                    env.name,
+                    style: const TextStyle(color: AppColors.textPrimary),
+                  ),
                   subtitle: Text(
                     env.id,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                    style: const TextStyle(color: AppColors.textSecondary),
                   ),
                   trailing: env.id == _selectedEnvironmentId
-                      ? const Icon(Icons.check_rounded, color: Color(0xFF4C6FFF))
+                      ? const Icon(Icons.check_rounded, color: AppColors.accent)
                       : null,
                   onTap: () => Navigator.pop(ctx, env.id),
                 );
@@ -453,6 +525,22 @@ class _MainPageState extends State<MainPage> {
     return null;
   }
 
+  /// Build inline cards for the user's own positive habits (Custom + Advice-promoted).
+  ///
+  /// Rendered directly inside the "Active Advices" list — there is no separate
+  /// "Your Habits" panel. Device routine/sequence habits are filtered out
+  /// (they live in the Habits page under "Device Habits").
+  List<Widget> _buildMyPositiveHabits() {
+    if (_activeHabits.isEmpty) return const [];
+    final mine = _activeHabits
+        .where((h) => h.kind == HabitKind.positive)
+        .toList()
+      ..sort((a, b) => b.probabilityScore.compareTo(a.probabilityScore));
+    if (mine.isEmpty) return const [];
+
+    return mine.map((h) => _MyHabitTile(habit: h)).toList();
+  }
+
   Future<void> _openAdviceEntryDialog(AdviceDetailData advice) async {
     final durationController = TextEditingController();
     TimeOfDay? startTime;
@@ -463,10 +551,10 @@ class _MainPageState extends State<MainPage> {
         return StatefulBuilder(
           builder: (context, setInnerState) {
             return AlertDialog(
-              backgroundColor: const Color(0xFF151A2E),
+              backgroundColor: AppColors.surface,
               title: Text(
                 '${advice.title} - Hour/Minute',
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: AppColors.textPrimary),
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -474,7 +562,7 @@ class _MainPageState extends State<MainPage> {
                 children: [
                   const Text(
                     'Start time',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                   ),
                   const SizedBox(height: 8),
                   SizedBox(
@@ -501,15 +589,15 @@ class _MainPageState extends State<MainPage> {
                   TextField(
                     controller: durationController,
                     keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white),
+                    style: const TextStyle(color: AppColors.textPrimary),
                     decoration: const InputDecoration(
                       labelText: 'Duration (minute)',
-                      labelStyle: TextStyle(color: Colors.white70),
+                      labelStyle: TextStyle(color: AppColors.textSecondary),
                       enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white30),
+                        borderSide: BorderSide(color: AppColors.borderStrong),
                       ),
                       focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF4C6FFF)),
+                        borderSide: BorderSide(color: AppColors.accent),
                       ),
                     ),
                   ),
@@ -521,7 +609,7 @@ class _MainPageState extends State<MainPage> {
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  onPressed: () {
+                  onPressed: () async {
                     final minutes = int.tryParse(durationController.text.trim());
                     if (startTime == null || minutes == null || minutes <= 0) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -534,16 +622,56 @@ class _MainPageState extends State<MainPage> {
                       );
                       return;
                     }
-                    Navigator.of(ctx).pop();
-                    _markAdviceCompletedToday();
-                    ScaffoldMessenger.of(this.context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Saved for ${advice.title}: ${startTime!.hour.toString().padLeft(2, '0')}:${startTime!.minute.toString().padLeft(2, '0')} - $minutes min',
+                    final key = advice.adviceKey;
+                    if (key == null || key.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'This advice is not linked to a backend key yet.',
+                          ),
+                          backgroundColor: Colors.redAccent,
+                          behavior: SnackBarBehavior.floating,
                         ),
-                        behavior: SnackBarBehavior.floating,
-                      ),
+                      );
+                      return;
+                    }
+                    final now = DateTime.now();
+                    final localStart = DateTime(
+                      now.year,
+                      now.month,
+                      now.day,
+                      startTime!.hour,
+                      startTime!.minute,
                     );
+                    Navigator.of(ctx).pop();
+                    try {
+                      await NotificationApi.scheduleAdvice(
+                        adviceKey: key,
+                        scheduledFor: localStart,
+                        durationMinutes: minutes,
+                      );
+                      if (!mounted) return;
+                      final hh = startTime!.hour.toString().padLeft(2, '0');
+                      final mm = startTime!.minute.toString().padLeft(2, '0');
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Reminder set: ${advice.title} at $hh:$mm '
+                            '($minutes min). Confirm from the bell when ready.',
+                          ),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    } on UserApiException catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text(e.message),
+                          backgroundColor: Colors.redAccent,
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
                   },
                   child: const Text('Save'),
                 ),
@@ -553,28 +681,6 @@ class _MainPageState extends State<MainPage> {
         );
       },
     );
-  }
-
-  void _markAdviceCompletedToday() {
-    final me = _currentUser;
-    if (me == null) return;
-
-    final now = DateTime.now();
-    final sameDay = _lastMarkedDate != null &&
-        _lastMarkedDate!.year == now.year &&
-        _lastMarkedDate!.month == now.month &&
-        _lastMarkedDate!.day == now.day;
-
-    setState(() {
-      if (me.dailyAdviceLog.length >= _daysToShow) {
-        me.dailyAdviceLog.removeAt(0);
-      }
-      me.dailyAdviceLog.add(true);
-      if (!sameDay) {
-        _geneProgressStep += 1;
-      }
-      _lastMarkedDate = now;
-    });
   }
 
   @override
@@ -588,7 +694,12 @@ class _MainPageState extends State<MainPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _TopSection(theme: theme, me: me),
+            _TopSection(
+              theme: theme,
+              me: me,
+              weather: _adviceBundle?.weather,
+              city: _adviceBundle?.city,
+            ),
             const SizedBox(height: 12),
             Expanded(
               child: ListView(
@@ -611,7 +722,7 @@ class _MainPageState extends State<MainPage> {
                               child: Text(
                                 _selectedEnvironmentName!,
                                 style: theme.textTheme.titleSmall?.copyWith(
-                                  color: Colors.white70,
+                                  color: AppColors.textSecondary,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -619,7 +730,7 @@ class _MainPageState extends State<MainPage> {
                             if (_environments.length > 1)
                               const Icon(
                                 Icons.unfold_more_rounded,
-                                color: Colors.white38,
+                                color: AppColors.textSecondary,
                                 size: 20,
                               ),
                           ],
@@ -655,7 +766,7 @@ class _MainPageState extends State<MainPage> {
                   Text(
                     'Community Progress',
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
+                      color: AppColors.textPrimary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -671,7 +782,7 @@ class _MainPageState extends State<MainPage> {
                   Text(
                     'Active Advices',
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
+                      color: AppColors.textPrimary,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -683,22 +794,28 @@ class _MainPageState extends State<MainPage> {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  if (_activeHabits.isNotEmpty)
-                    ..._activeHabits.map(
-                      (h) => _AdviceTile(
-                        data: AdviceDetailData(
-                          title: h.name,
-                          summary:
-                              '${h.recurrence.label} • ${(h.probabilityScore * 100).round()}% confidence',
-                          icon: Icons.auto_awesome,
-                        ),
-                        onTap: () => _openAdviceEntryDialog(
-                          AdviceDetailData(
-                            title: h.name,
-                            summary:
-                                'Log when you complete this habit so Synapse can refine your routine.',
-                            icon: Icons.auto_awesome,
-                          ),
+                  if (_adviceBundle != null &&
+                      _adviceBundle!.advices.isNotEmpty)
+                    ..._adviceBundle!.advices.map((a) {
+                      final detail = AdviceDetailData(
+                        title: a.title,
+                        summary: a.summary,
+                        icon: iconForName(a.iconName),
+                        adviceKey: a.key,
+                      );
+                      return _AdviceTile(
+                        data: detail,
+                        onTap: () => _openAdviceEntryDialog(detail),
+                      );
+                    })
+                  else if (_loadingAdvices)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       ),
                     )
@@ -709,6 +826,10 @@ class _MainPageState extends State<MainPage> {
                         onTap: () => _openAdviceEntryDialog(advice),
                       ),
                     ),
+                  // User's own positive habits (manual "Add Habit" entries +
+                  // advice-promoted habits). Adherence percent is shown
+                  // inline. Device routine/sequence habits are filtered out.
+                  ..._buildMyPositiveHabits(),
                 ],
               ),
             ),
@@ -723,26 +844,32 @@ class _TopSection extends StatelessWidget {
   const _TopSection({
     required this.theme,
     required this.me,
+    required this.weather,
+    required this.city,
   });
 
   final ThemeData theme;
   final _FamilyMemberProgress? me;
+  final WeatherSnapshot? weather;
+  final String? city;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _WeatherCard(theme: theme),
+        _WeatherCard(theme: theme, weather: weather, city: city),
         const SizedBox(height: 10),
         Text(
           'Welcome back,',
-          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: AppColors.textSecondary,
+          ),
         ),
         Text(
           me?.name ?? 'Guest',
           style: theme.textTheme.headlineSmall?.copyWith(
-            color: Colors.white,
+            color: AppColors.textPrimary,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -769,21 +896,21 @@ class _RecommendationBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2240),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF4C6FFF).withValues(alpha: 0.45)),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(
             children: [
-              Icon(Icons.auto_awesome, color: Color(0xFF8EA2FF), size: 20),
+              Icon(Icons.auto_awesome, color: AppColors.accent, size: 20),
               SizedBox(width: 8),
               Text(
                 'Synapse suggestion',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: AppColors.textPrimary,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -793,7 +920,7 @@ class _RecommendationBanner extends StatelessWidget {
           Text(
             recommendation.headline,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.textPrimary,
               fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
@@ -802,7 +929,7 @@ class _RecommendationBanner extends StatelessWidget {
           Text(
             recommendation.body,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.72),
+              color: AppColors.textSecondary,
               fontSize: 13,
               height: 1.35,
             ),
@@ -821,7 +948,7 @@ class _RecommendationBanner extends StatelessWidget {
                 child: FilledButton(
                   onPressed: busy ? null : onAccept,
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF4C6FFF),
+                    backgroundColor: AppColors.accent,
                   ),
                   child: busy
                       ? const SizedBox(
@@ -829,7 +956,7 @@ class _RecommendationBanner extends StatelessWidget {
                           width: 18,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: AppColors.textOnAccent,
                           ),
                         )
                       : const Text('Accept'),
@@ -872,7 +999,7 @@ class _CommunityProgressCard extends StatelessWidget {
       return _CardContainer(
         child: Text(
           emptyHint,
-          style: const TextStyle(color: Colors.white70),
+          style: const TextStyle(color: AppColors.textSecondary),
         ),
       );
     }
@@ -901,7 +1028,7 @@ class _CommunityProgressCard extends StatelessWidget {
                           Text(
                             member.name,
                             style: theme.textTheme.titleSmall?.copyWith(
-                              color: Colors.white,
+                              color: AppColors.textPrimary,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -942,65 +1069,160 @@ class _CommunityProgressCard extends StatelessWidget {
 }
 
 class _WeatherCard extends StatelessWidget {
-  final ThemeData theme;
+  const _WeatherCard({
+    required this.theme,
+    required this.weather,
+    required this.city,
+  });
 
-  const _WeatherCard({required this.theme});
+  final ThemeData theme;
+  final WeatherSnapshot? weather;
+  final String? city;
+
+  IconData get _conditionIcon {
+    final w = weather;
+    if (w == null) return Icons.wb_sunny_rounded;
+    if (!w.isDay) return Icons.nightlight_round;
+    switch (w.condition) {
+      case 'Clear':
+        return Icons.wb_sunny_rounded;
+      case 'Partly cloudy':
+        return Icons.wb_cloudy_rounded;
+      case 'Cloudy':
+        return Icons.cloud_rounded;
+      case 'Fog':
+        return Icons.foggy;
+      case 'Drizzle':
+      case 'Rain':
+      case 'Rain showers':
+        return Icons.umbrella_rounded;
+      case 'Snow':
+      case 'Snow showers':
+        return Icons.ac_unit_rounded;
+      case 'Thunderstorm':
+        return Icons.thunderstorm_rounded;
+      case 'Freezing rain':
+        return Icons.severe_cold_rounded;
+      default:
+        return Icons.wb_sunny_rounded;
+    }
+  }
+
+  List<Color> get _conditionGradient {
+    final w = weather;
+    if (w == null) {
+      return [const Color(0xFFFFD54F), const Color(0xFFFFB300)];
+    }
+    switch (w.condition) {
+      case 'Clear':
+        return [const Color(0xFFFFD54F), const Color(0xFFFFB300)];
+      case 'Partly cloudy':
+        return [const Color(0xFFB0BEC5), const Color(0xFF78909C)];
+      case 'Cloudy':
+      case 'Fog':
+        return [const Color(0xFF90A4AE), const Color(0xFF546E7A)];
+      case 'Drizzle':
+      case 'Rain':
+      case 'Rain showers':
+        return [const Color(0xFF64B5F6), const Color(0xFF1976D2)];
+      case 'Snow':
+      case 'Snow showers':
+      case 'Freezing rain':
+        return [const Color(0xFFE1F5FE), const Color(0xFF90CAF9)];
+      case 'Thunderstorm':
+        return [const Color(0xFF7E57C2), const Color(0xFF311B92)];
+      default:
+        return [const Color(0xFFFFD54F), const Color(0xFFFFB300)];
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final w = weather;
+    final cityLabel = (city ?? 'istanbul');
+    final cityNice = cityLabel.isEmpty
+        ? 'Istanbul'
+        : '${cityLabel[0].toUpperCase()}${cityLabel.substring(1)}';
+    final headline = w == null
+        ? 'Loading weather…'
+        : '${w.temperatureC.toStringAsFixed(0)}°C • ${w.condition}';
+    final subtitle = w?.tip ?? 'Tap to refresh after sign-in.';
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0C1021),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-        border: Border.all(color: Colors.white10),
+        boxShadow: AppColors.cardShadow,
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
-            decoration: const BoxDecoration(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [
-                  Color(0xFFFFD54F),
-                  Color(0xFFFFB300),
-                ],
-              ),
+              gradient: LinearGradient(colors: _conditionGradient),
             ),
-            child: const Icon(
-              Icons.wb_sunny_rounded,
-              color: Colors.white,
+            child: Icon(
+              _conditionIcon,
+              color: AppColors.textOnAccent,
               size: 26,
             ),
           ),
           const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '24°C - Sunny',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      cityNice,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (w != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        width: 4,
+                        height: 4,
+                        decoration: const BoxDecoration(
+                          color: AppColors.textSecondary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        w.isDay ? 'Day' : 'Night',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Perfect conditions for natural light.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: Colors.white70,
+                const SizedBox(height: 2),
+                Text(
+                  headline,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1018,9 +1240,9 @@ class _CardContainer extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF0C1021),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: AppColors.border),
       ),
       child: child,
     );
@@ -1036,8 +1258,8 @@ class _AdviceTile extends StatelessWidget {
     required this.onTap,
   });
 
-  static const _accent = Color(0xFF4C6FFF);
-  static const _card = Color(0xFF0C1021);
+  static const _accent = AppColors.accent;
+  static const _card = AppColors.surface;
 
   @override
   Widget build(BuildContext context) {
@@ -1046,7 +1268,7 @@ class _AdviceTile extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: AppColors.border),
           color: _card,
         ),
         clipBehavior: Clip.antiAlias,
@@ -1082,7 +1304,7 @@ class _AdviceTile extends StatelessWidget {
                         child: Text(
                           data.title,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                             fontWeight: FontWeight.w600,
                             fontSize: 15,
                           ),
@@ -1090,7 +1312,7 @@ class _AdviceTile extends StatelessWidget {
                       ),
                       Icon(
                         Icons.schedule_rounded,
-                        color: Colors.white.withValues(alpha: 0.55),
+                        color: AppColors.textSecondary,
                         size: 20,
                       ),
                     ],
@@ -1099,7 +1321,7 @@ class _AdviceTile extends StatelessWidget {
                   Text(
                     data.summary,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.72),
+                      color: AppColors.textSecondary,
                       fontSize: 13,
                       height: 1.35,
                     ),
@@ -1113,6 +1335,146 @@ class _AdviceTile extends StatelessWidget {
     );
   }
 }
+
+/// Compact dashboard card for the user's own positive habits.
+///
+/// Shows: prefix-trimmed name, "Manuel"/"Tavsiye" badge, recurrence label,
+/// adherence percentage bar (from `probability_score`), and a colored band
+/// reflecting the hysteresis state (confirmed / ambiguous / not active).
+class _MyHabitTile extends StatelessWidget {
+  const _MyHabitTile({required this.habit});
+
+  final Habit habit;
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (habit.probabilityScore.clamp(0.0, 1.0) * 100).round();
+    final band = habit.probabilityBand;
+    final Color barColor = switch (band) {
+      HabitProbabilityBand.confirmed => Colors.greenAccent.shade700,
+      HabitProbabilityBand.ambiguous => Colors.orangeAccent,
+      HabitProbabilityBand.notHabit => Colors.redAccent,
+    };
+    final String stateLabel = switch (band) {
+      HabitProbabilityBand.confirmed => 'Habit formed',
+      HabitProbabilityBand.ambiguous => 'On track — keep it consistent',
+      HabitProbabilityBand.notHabit => 'Not a habit yet',
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: AppColors.accent,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                habit.displayName,
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceMuted,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                habit.kindBadge,
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          habit.recurrence.label,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    '$pct%',
+                    style: TextStyle(
+                      color: barColor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: habit.probabilityScore.clamp(0.0, 1.0),
+                  minHeight: 6,
+                  backgroundColor: AppColors.surfaceMuted,
+                  valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                stateLabel,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 
 class _FamilyMemberProgress {
   _FamilyMemberProgress({

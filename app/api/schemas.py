@@ -107,6 +107,15 @@ class DeviceCreate(SQLModel):
     room: str | None = None
 
 
+class DeviceUpdate(SQLModel):
+    """Partial update; sadece gönderilen alanlar değişir."""
+
+    status: bool | None = None
+    current_value: Decimal | None = None
+    name: str | None = None
+    room: str | None = None
+
+
 class BehaviorLogCreate(SQLModel):
     user_id: str
     device_id: int

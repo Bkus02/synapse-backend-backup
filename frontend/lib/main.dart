@@ -5,6 +5,7 @@ import 'services/session_service.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,23 +19,10 @@ class SynapseApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final baseTheme = ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4C6FFF)),
-      useMaterial3: true,
-      fontFamily: 'Roboto',
-    );
-
     return MaterialApp(
       title: 'Synapse',
       debugShowCheckedModeBanner: false,
-      theme: baseTheme.copyWith(
-        scaffoldBackgroundColor: const Color(0xFF050814),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-      ),
+      theme: AppTheme.light,
       initialRoute: '/welcome',
       routes: {
         '/welcome': (_) => const WelcomePage(),

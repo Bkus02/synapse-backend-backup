@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -14,6 +14,7 @@ from app.analytics.sequence_miner import SequenceMinerConfig, mine_habit_sequenc
 from app.api.schemas import (
     BehaviorLogCreate,
     DeviceCreate,
+    DeviceUpdate,
     EnvironmentCreate,
     HabitCreate,
     HabitUpdate,
@@ -30,9 +31,12 @@ from app.core.models import (
     Environment,
     EnvironmentJoinRequest,
     Habit,
+    HabitRecurrence,
+    PositiveAdviceLog,
     Recommendation,
     RecommendationStatus,
     User,
+    UserDailyStreak,
     UserEnvironment,
 )
 from app.core.ports.event_publisher import EventPublisher
@@ -285,6 +289,59 @@ def list_environment_members(
     return members
 
 
+def list_environment_streaks(
+    environment_id: str,
+    session: Session,
+    *,
+    days: int = 10,
+) -> list[dict[str, Any]]:
+    """Return per-member positive-advice streak data for an environment.
+
+    Each entry contains: user_id, full_name, avatar_key, days (list[bool]) for
+    the last `days` calendar days where the day "qualifies" (≥2 distinct
+    advice completions), and weekly_streak_count which is the *current*
+    running streak (from `user_daily_streaks.current_streak`). The list is
+    sorted by current streak desc (top performers first).
+    """
+    _get_env_or_404(environment_id, session)
+    days = max(1, min(days, 60))
+    user_ids = session.exec(
+        select(UserEnvironment.user_id).where(
+            UserEnvironment.environment_id == environment_id
+        )
+    ).all()
+
+    now = datetime.now(UTC)
+    today = now.date()
+    start_day = today - timedelta(days=days - 1)
+
+    results: list[dict[str, Any]] = []
+    for user_id in user_ids:
+        user = session.get(User, user_id)
+        if user is None:
+            continue
+        active_dates = _qualifying_advice_dates(
+            user_id, session, start_day=start_day
+        )
+        flags: list[bool] = []
+        for offset in range(days):
+            d = start_day + timedelta(days=offset)
+            flags.append(d in active_dates)
+        streak_row = session.get(UserDailyStreak, user_id)
+        current_streak = streak_row.current_streak if streak_row is not None else 0
+        results.append(
+            {
+                "user_id": user.id,
+                "full_name": user.full_name,
+                "avatar_key": user.avatar_key,
+                "days": flags,
+                "weekly_streak_count": current_streak,
+            }
+        )
+    results.sort(key=lambda r: r["weekly_streak_count"], reverse=True)
+    return results
+
+
 def _require_environment_access(user_id: str, environment_id: str, session: Session) -> None:
     env = _get_env_or_404(environment_id, session)
     if env.admin_id == user_id:
@@ -352,8 +409,55 @@ def delete_device_authenticated(device_id: int, user_id: str, session: Session) 
     return delete_device(device_id, session)
 
 
+def patch_device(
+    device_id: int, user_id: str, payload: DeviceUpdate, session: Session
+) -> Device:
+    """Partial update for a device — used for runtime controls like
+    temperature, brightness and on/off state."""
+    device = session.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device bulunamadi.")
+    _require_environment_access(user_id, device.environment_id, session)
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(device, key, value)
+    session.add(device)
+    _commit_or_400(session, "Device guncellenemedi.")
+    session.refresh(device)
+    return device
+
+
 def list_behavior_logs(session: Session) -> list[BehaviorLog]:
     return list(session.exec(select(BehaviorLog)))
+
+
+def _qualifying_advice_dates(
+    user_id: str,
+    session: Session,
+    *,
+    start_day: date,
+    qualifying_threshold: int = 2,
+) -> set[date]:
+    """Return the set of calendar dates the user completed ≥`qualifying_threshold`
+    DISTINCT positive advices on (==day "qualifies" for streak)."""
+    cutoff = datetime(start_day.year, start_day.month, start_day.day, tzinfo=UTC)
+    logs = list(
+        session.exec(
+            select(PositiveAdviceLog).where(
+                PositiveAdviceLog.user_id == user_id,
+                PositiveAdviceLog.completed_at >= cutoff,
+            )
+        )
+    )
+    by_day: dict[date, set[str]] = {}
+    for log in logs:
+        ct = log.completed_at
+        if ct is None:
+            continue
+        if ct.tzinfo is None:
+            ct = ct.replace(tzinfo=UTC)
+        by_day.setdefault(ct.date(), set()).add(log.advice_key)
+    return {d for d, keys in by_day.items() if len(keys) >= qualifying_threshold}
 
 
 def get_daily_activity(
@@ -362,48 +466,35 @@ def get_daily_activity(
     *,
     days: int = 10,
 ) -> dict[str, Any]:
-    """Return last `days` days of activity (BehaviorLog presence) for a user.
+    """Return last `days` days of positive-advice activity for a user.
 
-    A day counts as `active` if the user has at least one BehaviorLog whose
-    `event_time` falls on that calendar day (UTC). The most recent day is at
-    the end of the list (chronological order) — matches the dashboard streak
-    visualisation.
+    A day counts as `active` if the user has completed at least 2 DISTINCT
+    `positive_advice_logs` on that calendar day (UTC) — the same qualifying
+    rule used by the daily-streak service. The most recent day is at the
+    end of the list (chronological order) — matches the dashboard streak
+    visualisation. ``weekly_streak_count`` exposes the *current* running
+    streak from ``user_daily_streaks.current_streak`` so the dashboard can
+    show e.g. 30 days instead of the rolling 7-day window.
     """
     days = max(1, min(days, 60))
     now = datetime.now(UTC)
     today = now.date()
     start_day = today - timedelta(days=days - 1)
-    cutoff = datetime(start_day.year, start_day.month, start_day.day, tzinfo=UTC)
 
-    logs = list(
-        session.exec(
-            select(BehaviorLog).where(
-                BehaviorLog.user_id == user_id,
-                BehaviorLog.event_time >= cutoff,
-            )
-        )
-    )
-    active_dates: set = set()
-    for log in logs:
-        et = log.event_time
-        if et is None:
-            continue
-        if et.tzinfo is None:
-            et = et.replace(tzinfo=UTC)
-        active_dates.add(et.date())
+    active_dates = _qualifying_advice_dates(user_id, session, start_day=start_day)
 
     series: list[dict[str, Any]] = []
     for offset in range(days):
         d = start_day + timedelta(days=offset)
         series.append({"date": d.isoformat(), "active": d in active_dates})
 
-    weekly_window = series[-7:] if len(series) >= 7 else series
-    weekly_streak = sum(1 for item in weekly_window if item["active"])
+    streak_row = session.get(UserDailyStreak, user_id)
+    current_streak = streak_row.current_streak if streak_row is not None else 0
 
     return {
         "user_id": user_id,
         "days": series,
-        "weekly_streak_count": weekly_streak,
+        "weekly_streak_count": current_streak,
     }
 
 
@@ -432,7 +523,97 @@ def create_behavior_log(payload: BehaviorLogCreate, session: Session) -> Behavio
     session.add(log)
     _commit_or_400(session, "BehaviorLog olusturulamadi: User/Device/FK kontrol edin.")
     session.refresh(log)
+    # If this action is the trigger side of a mined A→B sequence rule, drop
+    # a "sequence_trigger" notification so the user can confirm starting B.
+    try:
+        _maybe_emit_sequence_trigger(session, log)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("sequence trigger emit failed: %s", exc)
     return log
+
+
+def _maybe_emit_sequence_trigger(session: Session, log: BehaviorLog) -> None:
+    """If the just-written behaviour log matches an active A→B sequence
+    rule in ``habit_matrix``, emit a one-shot notification offering to
+    perform B.
+
+    ``habit_matrix`` stores trigger/target as opaque ``"{device_id}_{action}"``
+    tokens (see ``rebuild_habit_matrix``), so we look up by token equality
+    and parse the target side to resolve a real Device row. Low-confidence
+    rules are skipped per ``DEVICE_HABIT_MIN_PROBABILITY``.
+    """
+    # Imported locally to avoid a circular import (notification_service
+    # references core.models which itself drags this service via tests).
+    from app.application.services import notification_service
+    from app.models.habit_matrix import HabitMatrix
+
+    if log.device_id is None or not log.action:
+        return
+
+    trigger_token = f"{log.device_id}_{log.action}"
+    rules = list(
+        session.exec(
+            select(HabitMatrix).where(
+                HabitMatrix.user_id == log.user_id,
+                HabitMatrix.trigger_event == trigger_token,
+            )
+        )
+    )
+    if not rules:
+        return
+
+    now = datetime.now(UTC)
+    emitted = 0
+    for rule in rules:
+        try:
+            conf = float(rule.probability)
+        except (TypeError, ValueError):
+            continue
+        if conf < notification_service.DEVICE_HABIT_MIN_PROBABILITY:
+            continue
+
+        # Parse "{device_id}_{action}" out of the target_event token.
+        target_token = str(rule.target_event)
+        if "_" not in target_token:
+            continue
+        head, _, target_action = target_token.partition("_")
+        if not head.isdigit() or not target_action:
+            continue
+        target_device = session.get(Device, int(head))
+        if target_device is None:
+            continue
+
+        target_name = target_device.name or f"Device {target_device.id}"
+        verb = "turn on" if target_action.lower().endswith("on") else "turn off"
+        title = f"{target_name}?"
+        body = (
+            f"You usually {verb} {target_name} right after this. "
+            "Confirm to log it now."
+        )
+        note = notification_service._create_notification(  # noqa: SLF001
+            session,
+            user_id=log.user_id,
+            kind=notification_service.NotificationKind.SequenceTrigger,
+            title=title,
+            body=body,
+            scheduled_for=now,
+            requires_action=True,
+            payload={
+                "source_log_id": log.id,
+                "trigger_device_id": log.device_id,
+                "trigger_action": log.action,
+                "target_device_id": target_device.id,
+                "device_id": target_device.id,
+                "action": target_action,
+                "confidence": round(conf, 3),
+            },
+            initial_status=notification_service.NotificationStatus.Fired,
+        )
+        note.fired_at = now
+        session.add(note)
+        emitted += 1
+    if emitted:
+        session.commit()
 
 
 def delete_behavior_log(log_id: int, session: Session) -> dict[str, str]:
@@ -851,6 +1032,44 @@ def detect_safety_anomaly(
                 confidence=confidence,
             )
         )
+    # Drop a high-priority notification into the bell feed so the user
+    # actually sees the anomaly (independent of the legacy recommendations
+    # table). The notification is created already-`fired` so it appears
+    # immediately and is not "actionable" — dismissing is enough.
+    try:
+        from app.application.services import notification_service
+
+        now_utc = datetime.now(UTC)
+        title = f"{dev} has been on too long"
+        body = (
+            f"{dev} ({log.action}) has been running for "
+            f"{cur_minutes:.0f} min — about {cur_minutes / max(avg_minutes, 1):.1f}× "
+            f"your usual {avg_minutes:.0f} min. Please check if it should be off."
+        )
+        note = notification_service._create_notification(  # noqa: SLF001
+            session,
+            user_id=log.user_id,
+            kind=notification_service.NotificationKind.SafetyAnomaly,
+            title=title,
+            body=body,
+            scheduled_for=now_utc,
+            requires_action=False,
+            payload={
+                "device_id": log.device_id,
+                "device_name": dev,
+                "current_minutes": round(cur_minutes, 1),
+                "average_minutes": round(avg_minutes, 1),
+                "k_threshold": k,
+                "confidence": round(confidence, 3),
+            },
+            initial_status=notification_service.NotificationStatus.Fired,
+        )
+        note.fired_at = now_utc
+        session.add(note)
+        session.commit()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("safety_anomaly notification emit failed: %s", exc)
+
     return {
         "type": "SAFETY_ANOMALY",
         "trigger": f"{dev}_{log.action}",
@@ -881,13 +1100,196 @@ def get_habit_matrix_candidates(
     return rows
 
 
+_DEVICE_HABIT_PREFIX = "Device: "
+_DEVICE_ROUTINE_PREFIX = "Routine: "
+_DEVICE_HABIT_ENTER_THRESHOLD = 0.60
+_DEVICE_HABIT_EXIT_THRESHOLD = 0.45
+
+# A (device, action) ritmi → habit eşikleri. Aynı saat diliminde son
+# ``ROUTINE_LOOKBACK_DAYS`` gün içinde ≥``ROUTINE_MIN_DAYS`` ayrı günde
+# tetiklenen aksiyonlar otomatik olarak rutin habit'e dönüşür.
+ROUTINE_MIN_DAYS: int = 10
+ROUTINE_LOOKBACK_DAYS: int = 30
+ROUTINE_BUCKET_HOURS: int = 1  # 1-saatlik dilimler
+
+
+def _sync_device_habits_from_matrix(
+    session: Session,
+    user_id: str,
+    matrix_rules: list[dict[str, Any]],
+) -> int:
+    """Upsert ``Habit`` rows from mined ``habit_matrix`` rules for a user.
+
+    Histerezis (giriş ≥0.60, çıkış <0.45) — bu eşik aralığında eski durum
+    korunur. Eşik altı kurallar zaten ``mine_habit_sequences`` tarafından
+    filtreleniyor olabilir; biz yine de güvenli upsert yapıyoruz.
+    """
+    if not matrix_rules:
+        return 0
+
+    existing = {
+        h.name: h
+        for h in session.exec(
+            select(Habit).where(
+                Habit.user_id == user_id, Habit.name.like(f"{_DEVICE_HABIT_PREFIX}%")
+            )
+        )
+    }
+    touched_names: set[str] = set()
+    upserted = 0
+    for rule in matrix_rules:
+        trig = str(rule.get("trigger", ""))
+        tgt = str(rule.get("target", ""))
+        ctx = str(rule.get("context", ""))
+        prob = float(rule.get("probability", rule.get("confidence", 0.0)))
+        name = f"{_DEVICE_HABIT_PREFIX}{trig} → {tgt} ({ctx})"
+        touched_names.add(name)
+        prob_dec = Decimal(str(round(prob, 2)))
+
+        habit = existing.get(name)
+        if habit is None:
+            if prob < _DEVICE_HABIT_ENTER_THRESHOLD:
+                continue
+            habit = Habit(
+                user_id=user_id,
+                name=name,
+                probability_score=prob_dec,
+                is_active=True,
+                recurrence_type=HabitRecurrence.Daily,
+                device_id=None,
+            )
+            session.add(habit)
+            upserted += 1
+        else:
+            habit.probability_score = prob_dec
+            if prob >= _DEVICE_HABIT_ENTER_THRESHOLD:
+                habit.is_active = True
+            elif prob < _DEVICE_HABIT_EXIT_THRESHOLD:
+                habit.is_active = False
+            session.add(habit)
+            upserted += 1
+
+    # Mining kurallarından düşen eski habitleri pasifleştir (silmiyoruz —
+    # geçmiş tetikleyici izini korumak için).
+    for name, habit in existing.items():
+        if name not in touched_names and habit.is_active:
+            habit.is_active = False
+            session.add(habit)
+    return upserted
+
+
+def detect_device_routines(session: Session) -> int:
+    """Turn single-action repeats into Habit rows ("Routine: AC TurnOn ~18:00").
+
+    Sequence miner sadece A→B çiftlerini yakaladığı için "her sabah 8'de
+    klima açma" gibi tek-aksiyon ritimleri kaçırılıyor. Burada her
+    ``(user, device, action)`` için son ``ROUTINE_LOOKBACK_DAYS`` günde
+    aynı saat diliminde tekrarlanan aksiyonları sayıyor, ``ROUTINE_MIN_DAYS``
+    eşiğini aşanları ``habits`` tablosuna upsert ediyoruz.
+    """
+    from collections import defaultdict
+
+    cutoff = datetime.now(UTC) - timedelta(days=ROUTINE_LOOKBACK_DAYS)
+    logs = list(
+        session.exec(
+            select(BehaviorLog).where(BehaviorLog.event_time >= cutoff)
+        )
+    )
+    if not logs:
+        return 0
+
+    # (user, device, action) -> {bucket_hour: set(date)}
+    grouped: dict[tuple[str, int, str], dict[int, set]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    for log in logs:
+        if log.device_id is None:
+            continue
+        key = (log.user_id, log.device_id, log.action)
+        bucket = (log.event_time.hour // ROUTINE_BUCKET_HOURS) * ROUTINE_BUCKET_HOURS
+        grouped[key][bucket].add(log.event_time.date())
+
+    # Eski rutin habit'leri temizle (yenilenecekler upsert, kalanlar pasifleşir).
+    existing_routines = list(
+        session.exec(
+            select(Habit).where(Habit.name.like(f"{_DEVICE_ROUTINE_PREFIX}%"))
+        )
+    )
+    by_name: dict[tuple[str, str], Habit] = {
+        (h.user_id, h.name): h for h in existing_routines
+    }
+    touched: set[tuple[str, str]] = set()
+
+    upserted = 0
+    for (uid, device_id, action), buckets in grouped.items():
+        # En yoğun saat dilimi
+        best_bucket, best_days = max(
+            ((b, len(ds)) for b, ds in buckets.items()),
+            key=lambda x: x[1],
+            default=(0, 0),
+        )
+        if best_days < ROUTINE_MIN_DAYS:
+            continue
+
+        device = session.get(Device, device_id)
+        device_name = device.name if device and device.name else f"Device {device_id}"
+        action_label = str(action).replace("_", " ").title()
+        # Name shape: "Routine: <device> <TurnOn|TurnOff> @HH"
+        # The "@HH" suffix is the canonical hour token the notification
+        # service parses to know when to fire today's confirm prompt.
+        name = (
+            f"{_DEVICE_ROUTINE_PREFIX}{device_name} {action_label} "
+            f"@{best_bucket:02d}"
+        )
+        touched.add((uid, name))
+
+        # 10 günde 0.60, her ek gün +0.03, üst sınır 0.95
+        prob = min(0.95, 0.55 + (best_days - ROUTINE_MIN_DAYS + 1) * 0.03)
+        prob_dec = Decimal(str(round(prob, 2)))
+
+        habit = by_name.get((uid, name))
+        if habit is None:
+            habit = Habit(
+                user_id=uid,
+                name=name,
+                probability_score=prob_dec,
+                is_active=True,
+                recurrence_type=HabitRecurrence.Daily,
+                device_id=device_id,
+            )
+            session.add(habit)
+        else:
+            habit.probability_score = prob_dec
+            habit.is_active = True
+            session.add(habit)
+        upserted += 1
+
+    # Dokunulmayan eski rutinleri pasifleştir (siliyoruz değil — geçmiş kalsın).
+    for (uid_name), habit in by_name.items():
+        if uid_name not in touched and habit.is_active:
+            habit.is_active = False
+            session.add(habit)
+
+    try:
+        session.commit()
+    except Exception as exc:  # pragma: no cover - defensive
+        session.rollback()
+        logger.warning("detect_device_routines failed: %s", exc)
+        return 0
+    return upserted
+
+
 def rebuild_habit_matrix(session: Session) -> dict[str, int]:
     """
     Tum kullanicilar icin sequence miner'i calistirip habit_matrix tablosuna upsert yapar.
+
+    Aynı zamanda yüksek olasılıklı her kuralı ``habits`` tablosunda
+    histerezisli ``Habit`` satırına dönüştürür (dashboard "Active Habits"
+    kartı buradan beslenir).
     """
     logs = list(session.exec(select(BehaviorLog).order_by(BehaviorLog.user_id, BehaviorLog.event_time)))
     if not logs:
-        return {"users_processed": 0, "rules_upserted": 0}
+        return {"users_processed": 0, "rules_upserted": 0, "device_habits_upserted": 0}
 
     rows: list[dict[str, Any]] = []
     for log in logs:
@@ -903,6 +1305,7 @@ def rebuild_habit_matrix(session: Session) -> dict[str, int]:
     users = sorted(logs_df["user_id"].dropna().astype(str).unique().tolist())
 
     rules_upserted = 0
+    device_habits_upserted = 0
     now = datetime.now(UTC)
     cfg = SequenceMinerConfig()
 
@@ -921,17 +1324,45 @@ def rebuild_habit_matrix(session: Session) -> dict[str, int]:
         old_rows = list(session.exec(select(HabitMatrix).where(HabitMatrix.user_id == uid)))
         for old in old_rows:
             session.delete(old)
+        # Force the DELETEs to the DB before queuing INSERTs — otherwise a
+        # later autoflush (triggered by _sync_device_habits_from_matrix)
+        # would emit INSERTs first and hit the unique constraint on
+        # (user_id, trigger_event, target_event, context).
+        if old_rows:
+            session.flush()
+        normalised_rules: list[dict[str, Any]] = []
         for rule in mined:
+            trig = str(rule.get("trigger", ""))
+            tgt = str(rule.get("target", ""))
+            ctx = _to_day_night(str(rule.get("context", "")))
+            prob = float(rule.get("probability", rule.get("confidence", 0.0)))
             hm = HabitMatrix(
                 user_id=uid,
-                trigger_event=str(rule.get("trigger", "")),
-                target_event=str(rule.get("target", "")),
-                context=_to_day_night(str(rule.get("context", ""))),
-                probability=float(rule.get("probability", rule.get("confidence", 0.0))),
+                trigger_event=trig,
+                target_event=tgt,
+                context=ctx,
+                probability=prob,
                 last_updated=now,
             )
             session.add(hm)
             rules_upserted += 1
+            normalised_rules.append(
+                {"trigger": trig, "target": tgt, "context": ctx, "probability": prob}
+            )
+
+        device_habits_upserted += _sync_device_habits_from_matrix(
+            session, uid, normalised_rules
+        )
 
     _commit_or_400(session, "Habit matrix rebuild basarisiz.")
-    return {"users_processed": len(users), "rules_upserted": rules_upserted}
+
+    # Tek-aksiyon ritimleri (saatlik rutin) çift kuralından bağımsız;
+    # sequence_miner pair gerektirdiği için onlar burada yakalanır.
+    routine_habits = detect_device_routines(session)
+
+    return {
+        "users_processed": len(users),
+        "rules_upserted": rules_upserted,
+        "device_habits_upserted": device_habits_upserted,
+        "routine_habits_upserted": routine_habits,
+    }

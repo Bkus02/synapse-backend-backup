@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 import 'package:flutter/services.dart';
 
 import '../models/advice_detail_data.dart';
@@ -11,10 +12,7 @@ class AdviceDetailPage extends StatefulWidget {
 
   final AdviceDetailData data;
 
-  static const _bg = Color(0xFF0C1021);
-  static const _accent = Color(0xFF4C6FFF);
-  static const _card = Color(0xFF151A2E);
-
+      
   @override
   State<AdviceDetailPage> createState() => _AdviceDetailPageState();
 }
@@ -27,22 +25,22 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
 
   static const _fieldBorder = OutlineInputBorder(
     borderRadius: BorderRadius.all(Radius.circular(12)),
-    borderSide: BorderSide(color: Colors.white24),
+    borderSide: BorderSide(color: AppColors.border),
   );
 
   InputDecoration _inputDecoration(String label, {String? hint}) {
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      labelStyle: const TextStyle(color: Colors.white60),
-      hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.35)),
-      floatingLabelStyle: const TextStyle(color: AdviceDetailPage._accent),
+      labelStyle: const TextStyle(color: AppColors.textSecondary),
+      hintStyle: TextStyle(color: AppColors.textPrimary.withValues(alpha: 0.35)),
+      floatingLabelStyle: const TextStyle(color: AppColors.accent),
       filled: true,
-      fillColor: const Color(0xFF0A1020),
+      fillColor: AppColors.inputFill,
       border: _fieldBorder,
       enabledBorder: _fieldBorder,
       focusedBorder: _fieldBorder.copyWith(
-        borderSide: const BorderSide(color: AdviceDetailPage._accent, width: 1.5),
+        borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
       ),
     );
   }
@@ -61,8 +59,8 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.dark(
-              primary: AdviceDetailPage._accent,
-              surface: AdviceDetailPage._card,
+              primary: AppColors.accent,
+              surface: AppColors.surface,
             ),
           ),
           child: child!,
@@ -110,11 +108,11 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: AdviceDetailPage._bg,
+      backgroundColor: AppColors.surface,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.textOnAccent,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
@@ -128,15 +126,15 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    color: AdviceDetailPage._accent.withValues(alpha: 0.18),
+                    color: AppColors.accent.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: AdviceDetailPage._accent.withValues(alpha: 0.45),
+                      color: AppColors.accent.withValues(alpha: 0.45),
                     ),
                   ),
                   child: Icon(
                     data.icon,
-                    color: AdviceDetailPage._accent,
+                    color: AppColors.accent,
                     size: 30,
                   ),
                 ),
@@ -148,7 +146,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                       Text(
                         data.title,
                         style: theme.textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
+                          color: AppColors.textPrimary,
                           fontWeight: FontWeight.w700,
                           height: 1.2,
                         ),
@@ -157,7 +155,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                       Text(
                         data.summary,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white70,
+                          color: AppColors.textSecondary,
                           height: 1.35,
                         ),
                       ),
@@ -170,7 +168,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
             Text(
               'Start time',
               style: theme.textTheme.labelLarge?.copyWith(
-                color: Colors.white54,
+                color: AppColors.textSecondary,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.5,
               ),
@@ -184,14 +182,14 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                 child: Ink(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                   decoration: BoxDecoration(
-                    color: AdviceDetailPage._card,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                      color: AdviceDetailPage._accent.withValues(alpha: 0.35),
+                      color: AppColors.accent.withValues(alpha: 0.35),
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AdviceDetailPage._accent.withValues(alpha: 0.08),
+                        color: AppColors.accent.withValues(alpha: 0.08),
                         blurRadius: 20,
                         offset: const Offset(0, 8),
                       ),
@@ -201,7 +199,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                     children: [
                       Icon(
                         Icons.schedule_rounded,
-                        color: AdviceDetailPage._accent,
+                        color: AppColors.accent,
                         size: 26,
                       ),
                       const SizedBox(width: 14),
@@ -212,8 +210,8 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                               : 'Tap to set start time',
                           style: theme.textTheme.titleLarge?.copyWith(
                             color: _startTime != null
-                                ? Colors.white
-                                : Colors.white54,
+                                ? AppColors.textPrimary
+                                : AppColors.textSecondary,
                             fontWeight: FontWeight.w700,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
@@ -221,7 +219,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                       ),
                       Icon(
                         Icons.edit_calendar_outlined,
-                        color: AdviceDetailPage._accent.withValues(alpha: 0.8),
+                        color: AppColors.accent.withValues(alpha: 0.8),
                         size: 22,
                       ),
                     ],
@@ -233,7 +231,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
             Text(
               'Target duration',
               style: theme.textTheme.labelLarge?.copyWith(
-                color: Colors.white54,
+                color: AppColors.textSecondary,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.5,
               ),
@@ -246,7 +244,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
                 FilteringTextInputFormatter.digitsOnly,
               ],
               style: const TextStyle(
-                color: Colors.white,
+                color: AppColors.textPrimary,
                 fontSize: 32,
                 fontWeight: FontWeight.w800,
                 fontFeatures: [FontFeature.tabularFigures()],
@@ -267,7 +265,7 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
               'How long you want to spend on this (used later for reminders).',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.white38,
+                color: AppColors.textMuted,
                 height: 1.35,
               ),
             ),
@@ -276,8 +274,8 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
               height: 52,
               child: FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: AdviceDetailPage._accent,
-                  foregroundColor: Colors.white,
+                  backgroundColor: AppColors.accent,
+                  foregroundColor: AppColors.textOnAccent,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
@@ -308,8 +306,8 @@ class _AdviceDetailPageState extends State<AdviceDetailPage> {
               height: 52,
               child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
+                  foregroundColor: AppColors.textSecondary,
+                  side: const BorderSide(color: AppColors.border),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
