@@ -183,6 +183,23 @@ def delete_environment(
     return smart_home_service.delete_environment(environment_id, session)
 
 
+@router.delete("/{environment_id}/members/{user_id}")
+def remove_environment_member(
+    environment_id: str,
+    user_id: str,
+    token_user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
+    # Self-leave is allowed for any member; removing someone else needs admin.
+    if token_user_id != user_id:
+        smart_home_service.require_environment_admin(
+            token_user_id, environment_id, session
+        )
+    return smart_home_service.remove_user_from_environment(
+        environment_id, user_id, session
+    )
+
+
 @router.post("/{environment_id}/add-user", response_model=UserEnvironment)
 def add_user_to_environment(
     environment_id: str,

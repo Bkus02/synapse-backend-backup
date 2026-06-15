@@ -20,11 +20,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _weightController = TextEditingController();
   final _ageController = TextEditingController();
   String _selectedCity = 'istanbul';
+  String _selectedGender = 'Erkek';
 
   static const _cityOptions = <Map<String, String>>[
     {'key': 'istanbul', 'label': 'Istanbul'},
     {'key': 'ankara', 'label': 'Ankara'},
     {'key': 'izmir', 'label': 'Izmir'},
+  ];
+
+  static const _genderOptions = <Map<String, String>>[
+    {'key': 'Erkek', 'label': 'Male'},
+    {'key': 'Kadın', 'label': 'Female'},
   ];
 
   bool _submitting = false;
@@ -61,6 +67,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         weight: weight,
         age: age,
         location: _selectedCity,
+        gender: _selectedGender,
       );
       if (!mounted) return;
       final email = _emailController.text.trim();
@@ -211,6 +218,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 style: const TextStyle(color: AppColors.textPrimary),
                 decoration: _decoration('Age'),
                 validator: _required,
+              ),
+              const SizedBox(height: 16),
+              InputDecorator(
+                decoration: _decoration('Gender'),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedGender,
+                    isExpanded: true,
+                    style: const TextStyle(color: AppColors.textPrimary),
+                    dropdownColor: AppColors.surface,
+                    items: _genderOptions
+                        .map(
+                          (g) => DropdownMenuItem<String>(
+                            value: g['key'],
+                            child: Text(g['label']!),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _submitting
+                        ? null
+                        : (v) {
+                            if (v != null) {
+                              setState(() => _selectedGender = v);
+                            }
+                          },
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               InputDecorator(

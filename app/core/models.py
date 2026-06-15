@@ -22,6 +22,7 @@ from enum import Enum
 
 from pydantic import field_validator
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Column,
@@ -158,6 +159,11 @@ class User(SQLModel, table=True):
         default=None,
         sa_column=Column(Text),
         description="Preset profile avatar key.",
+    )
+    gender: str | None = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="Cinsiyet (Erkek/Kadın) — cold-start ve öneri kohortu için.",
     )
 
     @field_validator("id")
@@ -477,6 +483,7 @@ class NotificationKind(str, Enum):
     DeviceRoutine = "device_routine"
     SequenceTrigger = "sequence_trigger"
     StreakMilestone = "streak_milestone"
+    StreakRisk = "streak_risk"
     SafetyAnomaly = "safety_anomaly"
 
 
@@ -504,7 +511,13 @@ class Notification(SQLModel, table=True):
 
     id: int | None = Field(
         default=None,
-        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+        # BIGINT does not autoincrement on SQLite (only INTEGER PK does),
+        # so fall back to INTEGER there for the test engine.
+        sa_column=Column(
+            BigInteger().with_variant(Integer, "sqlite"),
+            primary_key=True,
+            autoincrement=True,
+        ),
     )
     user_id: str = Field(max_length=8, foreign_key="users.id")
     kind: str = Field(sa_column=Column(Text, nullable=False))
@@ -527,7 +540,13 @@ class Notification(SQLModel, table=True):
     )
     payload: dict = Field(
         default_factory=dict,
-        sa_column=Column(JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")),
+        # JSONB on PostgreSQL, plain JSON on SQLite so the in-memory test
+        # engine (which cannot compile JSONB) can still create the table.
+        sa_column=Column(
+            JSONB().with_variant(JSON(), "sqlite"),
+            nullable=False,
+            server_default=sql_text("'{}'"),
+        ),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
@@ -552,7 +571,11 @@ class AdviceSchedule(SQLModel, table=True):
 
     id: int | None = Field(
         default=None,
-        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+        sa_column=Column(
+            BigInteger().with_variant(Integer, "sqlite"),
+            primary_key=True,
+            autoincrement=True,
+        ),
     )
     user_id: str = Field(max_length=8, foreign_key="users.id")
     advice_key: str = Field(sa_column=Column(Text, nullable=False))

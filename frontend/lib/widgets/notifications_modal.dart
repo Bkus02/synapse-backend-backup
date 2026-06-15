@@ -108,6 +108,13 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       _feedError = null;
     });
     try {
+      // Auto-generate today's notifications (idempotent) so reminders arrive
+      // without any manual action.
+      try {
+        await NotificationApi.seedToday();
+      } catch (_) {
+        // Best-effort: still show whatever feed already exists.
+      }
       final feed = await NotificationApi.feed(limit: 60);
       if (mounted) {
         setState(() {
@@ -143,6 +150,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
               .map((item) => item.id == updated.id ? updated : item)
               .toList();
         });
+        SessionService.instance.notifyActivityChanged();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Confirmed: ${n.title}'),
@@ -189,31 +197,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       }
     } finally {
       if (mounted) setState(() => _busyNotificationIds.remove(n.id));
-    }
-  }
-
-  Future<void> _runDay31Simulation() async {
-    try {
-      await NotificationApi.seedToday();
-      await _loadFeed();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Today's notifications generated."),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } on UserApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
     }
   }
 
@@ -324,6 +307,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return Icons.bolt_rounded;
       case 'streak_milestone':
         return Icons.local_fire_department_rounded;
+      case 'streak_risk':
+        return Icons.whatshot_rounded;
       case 'safety_anomaly':
         return Icons.warning_amber_rounded;
       default:
@@ -345,6 +330,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       case 'morning_greeting':
         return 'Daily';
       case 'advice_reminder':
+      case 'streak_risk':
         return 'Positive advice';
       case 'device_routine':
       case 'sequence_trigger':
@@ -442,12 +428,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           ),
                         ),
                         IconButton(
-                          onPressed: _runDay31Simulation,
-                          icon: const Icon(Icons.science_outlined),
-                          color: widget.accent,
-                          tooltip: 'Simulate today (day 31)',
-                        ),
-                        IconButton(
                           onPressed: () {
                             _loadFeed();
                             _loadJoin();
@@ -487,7 +467,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                             child: Text(
                               SessionService.instance.user == null
                                   ? 'Sign in to see your notifications.'
-                                  : "Nothing for today yet. Tap the flask above to simulate today's notifications.",
+                                  : 'Nothing for today yet.',
                               style: TextStyle(
                                 color: AppColors.textPrimary.withValues(alpha: 0.45),
                                 fontSize: 14,

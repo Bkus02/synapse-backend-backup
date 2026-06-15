@@ -1,10 +1,10 @@
 """User-planned advice sessions.
 
 The dashboard advice tile opens a tiny "start time + duration" dialog.
-We persist the plan in ``advice_schedules`` AND drop a paired
-``advice_reminder`` Notification row that fires at the chosen start time
-("Ready for your run?"). On confirm the notification service writes the
-actual ``positive_advice_logs`` completion and recomputes the streak.
+We persist the plan in ``advice_schedules``, write a ``positive_advice_logs``
+row immediately (so streak / Community Progress update right away), and drop
+a paired ``advice_reminder`` Notification. Bell confirm is optional and
+idempotent when the schedule is already marked completed.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlmodel import Session
 
-from app.application.services import notification_service
+from app.application.services import notification_service, positive_advice_service
 from app.application.services.recommendation_catalog import ADVICE_CATALOG
 from app.core.models import (
     AdviceSchedule,
@@ -99,6 +99,24 @@ def schedule_advice(
     session.commit()
     session.refresh(sched)
     session.refresh(note)
+
+    # User entered start time + duration on the dashboard — count it toward
+    # streak/habit progress immediately (bell confirm is optional / idempotent).
+    positive_advice_service.log_advice_completion(
+        user_id=user_id,
+        advice_key=advice_key,
+        duration_minutes=duration_minutes,
+        completed_at=scheduled_for,
+        session=session,
+    )
+    sched = session.get(AdviceSchedule, sched.id)
+    if sched is not None:
+        sched.status = "completed"
+        session.add(sched)
+        session.commit()
+        session.refresh(sched)
+
+    note = session.get(Notification, note.id) or note
 
     return {
         "schedule": {

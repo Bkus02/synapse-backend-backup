@@ -264,6 +264,58 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     return uid != null && aid != null && uid == aid;
   }
 
+  Future<void> _confirmLeaveEnvironment() async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave environment'),
+        content: Text(
+          'Leave "${widget.environment.name}"? You can rejoin later with the '
+          'environment ID.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await EnvironmentApi.removeMember(
+        environmentId: widget.environment.id,
+        userId: uid,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You left the environment'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.of(context).pop();
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _loadPeople() async {
     setState(() {
       _loadingPeople = true;
@@ -295,6 +347,60 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
           _peopleError = e.toString();
           _loadingPeople = false;
         });
+      }
+    }
+  }
+
+  Future<void> _confirmRemoveMember(EnvironmentMember member) async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null) return;
+    final name = member.fullName?.trim().isNotEmpty == true
+        ? member.fullName!.trim()
+        : member.userId;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove member'),
+        content: Text(
+          'Remove "$name" from this environment?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await EnvironmentApi.removeMember(
+        environmentId: widget.environment.id,
+        userId: member.userId,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Member removed'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _loadPeople();
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
@@ -374,6 +480,20 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(env.name),
+        actions: [
+          if (!_isAdmin && SessionService.instance.user?['id'] != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: TextButton.icon(
+                onPressed: _confirmLeaveEnvironment,
+                icon: const Icon(Icons.logout_rounded, size: 18),
+                label: const Text('Leave'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.redAccent,
+                ),
+              ),
+            ),
+        ],
       ),
       floatingActionButton: SessionService.instance.user?['id'] != null
           ? FloatingActionButton.extended(
@@ -583,30 +703,93 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                         const SizedBox(width: 12),
                     itemBuilder: (context, i) {
                       final m = _members[i];
+                      final canRemove =
+                          _isAdmin && m.userId != widget.environment.adminId;
+                      final isDirector =
+                          m.userId == widget.environment.adminId;
                       return SizedBox(
                         width: 72,
-                        child: Column(
-                          children: [
-                            memberAvatar(
-                              avatarKey: m.avatarKey,
-                              fullName: m.fullName,
-                              radius: 26,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              m.fullName?.trim().isNotEmpty == true
-                                  ? m.fullName!.trim()
-                                  : m.userId,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: AppColors.textSecondary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
+                        child: InkWell(
+                          onTap: canRemove
+                              ? () => _confirmRemoveMember(m)
+                              : null,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Column(
+                            children: [
+                              Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  memberAvatar(
+                                    avatarKey: m.avatarKey,
+                                    fullName: m.fullName,
+                                    radius: 26,
+                                  ),
+                                  if (canRemove)
+                                    Positioned(
+                                      right: -2,
+                                      top: -2,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.redAccent,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: AppColors.surface,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: const Icon(
+                                          Icons.close_rounded,
+                                          size: 12,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  if (isDirector)
+                                    Positioned(
+                                      right: -2,
+                                      bottom: -2,
+                                      child: Container(
+                                        width: 20,
+                                        height: 20,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: AppColors.accent,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: AppColors.surface,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'D',
+                                          style: TextStyle(
+                                            color: AppColors.textOnAccent,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                            height: 1,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 6),
+                              Text(
+                                m.fullName?.trim().isNotEmpty == true
+                                    ? m.fullName!.trim()
+                                    : m.userId,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -1248,14 +1431,96 @@ class _ProgramPickerRow extends StatelessWidget {
   }
 }
 
-double _defaultCurrentValue(EnvironmentDeviceType type) {
-  return switch (type) {
-    EnvironmentDeviceType.lamp => 50,
-    EnvironmentDeviceType.thermostat => 21,
-    EnvironmentDeviceType.plug => 0,
-    EnvironmentDeviceType.sensor => 0,
-    EnvironmentDeviceType.other => 0,
-  };
+/// Selectable device catalog in the "Add device" sheet.
+///
+/// `devices.type` only has 5 buckets (Lamp/Thermostat/Plug/Sensor/Other), so
+/// real appliances (oven, dishwasher, washing machine, AC) are stored under
+/// the closest bucket and identified by their name — exactly how
+/// [EnvironmentDevice.controlKind] sniffs the right control widgets. Each
+/// catalog entry therefore carries a [defaultName] that keeps the keyword the
+/// sniffer needs, so the freshly added device renders the correct controls.
+///
+/// `lampPlain` and `lampTuya` both create a `Lamp` device, but only
+/// `lampTuya` probes and links the physical Smart Life / Tuya bulb.
+enum _DeviceChoice {
+  lampPlain,
+  lampTuya,
+  airConditioner,
+  thermostat,
+  oven,
+  dishwasher,
+  washingMachine,
+  plug,
+  sensor,
+  other,
+}
+
+extension _DeviceChoiceX on _DeviceChoice {
+  EnvironmentDeviceType get deviceType => switch (this) {
+        _DeviceChoice.lampPlain => EnvironmentDeviceType.lamp,
+        _DeviceChoice.lampTuya => EnvironmentDeviceType.lamp,
+        _DeviceChoice.airConditioner => EnvironmentDeviceType.thermostat,
+        _DeviceChoice.thermostat => EnvironmentDeviceType.thermostat,
+        _DeviceChoice.oven => EnvironmentDeviceType.plug,
+        _DeviceChoice.dishwasher => EnvironmentDeviceType.plug,
+        _DeviceChoice.washingMachine => EnvironmentDeviceType.plug,
+        _DeviceChoice.plug => EnvironmentDeviceType.plug,
+        _DeviceChoice.sensor => EnvironmentDeviceType.sensor,
+        _DeviceChoice.other => EnvironmentDeviceType.other,
+      };
+
+  bool get isTuya => this == _DeviceChoice.lampTuya;
+
+  String get label => switch (this) {
+        _DeviceChoice.lampPlain => 'Lamp',
+        _DeviceChoice.lampTuya => 'Lamp (Tuya)',
+        _DeviceChoice.airConditioner => 'Air Conditioner',
+        _DeviceChoice.thermostat => 'Thermostat',
+        _DeviceChoice.oven => 'Oven',
+        _DeviceChoice.dishwasher => 'Dishwasher',
+        _DeviceChoice.washingMachine => 'Washing Machine',
+        _DeviceChoice.plug => 'Smart Plug',
+        _DeviceChoice.sensor => 'Sensor',
+        _DeviceChoice.other => 'Other',
+      };
+
+  /// Pre-filled (editable) name. Appliances need the keyword so
+  /// [EnvironmentDevice.controlKind] resolves to the right controls; generic
+  /// kinds are left blank so the user types their own label.
+  String get defaultName => switch (this) {
+        _DeviceChoice.airConditioner => 'Air Conditioner',
+        _DeviceChoice.thermostat => 'Thermostat',
+        _DeviceChoice.oven => 'Oven',
+        _DeviceChoice.dishwasher => 'Dishwasher',
+        _DeviceChoice.washingMachine => 'Washing Machine',
+        _ => '',
+      };
+
+  double get defaultCurrentValue => switch (this) {
+        _DeviceChoice.lampPlain => 50,
+        _DeviceChoice.lampTuya => 50,
+        _DeviceChoice.airConditioner => 22,
+        _DeviceChoice.thermostat => 21,
+        _DeviceChoice.oven => 180,
+        _DeviceChoice.dishwasher => 1,
+        _DeviceChoice.washingMachine => 1,
+        _DeviceChoice.plug => 0,
+        _DeviceChoice.sensor => 0,
+        _DeviceChoice.other => 0,
+      };
+
+  IconData get icon => switch (this) {
+        _DeviceChoice.lampPlain => Icons.lightbulb_outline_rounded,
+        _DeviceChoice.lampTuya => Icons.lightbulb_rounded,
+        _DeviceChoice.airConditioner => Icons.ac_unit_rounded,
+        _DeviceChoice.thermostat => Icons.thermostat_rounded,
+        _DeviceChoice.oven => Icons.local_fire_department_rounded,
+        _DeviceChoice.dishwasher => Icons.dining_rounded,
+        _DeviceChoice.washingMachine => Icons.local_laundry_service_rounded,
+        _DeviceChoice.plug => Icons.electrical_services_rounded,
+        _DeviceChoice.sensor => Icons.sensors_rounded,
+        _DeviceChoice.other => Icons.devices_other_rounded,
+      };
 }
 
 class _AddDeviceSheet extends StatefulWidget {
@@ -1278,7 +1543,7 @@ class _AddDeviceSheet extends StatefulWidget {
 class _AddDeviceSheetState extends State<_AddDeviceSheet> {
   final _name = TextEditingController();
   final _room = TextEditingController();
-  EnvironmentDeviceType _type = EnvironmentDeviceType.lamp;
+  _DeviceChoice _choice = _DeviceChoice.lampPlain;
   bool _saving = false;
 
   bool _tuyaChecking = false;
@@ -1286,11 +1551,7 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
   TuyaLampStatus? _tuyaStatus;
   String? _tuyaError;
 
-  @override
-  void initState() {
-    super.initState();
-    _maybeProbeTuya();
-  }
+  EnvironmentDeviceType get _type => _choice.deviceType;
 
   @override
   void dispose() {
@@ -1299,8 +1560,11 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
     super.dispose();
   }
 
+  /// Probe the physical Tuya bulb only when the user explicitly chose the
+  /// "Lamp (Tuya)" option. The device name is left untouched so the user
+  /// types their own label.
   Future<void> _maybeProbeTuya() async {
-    if (_type != EnvironmentDeviceType.lamp) return;
+    if (!_choice.isTuya) return;
     setState(() {
       _tuyaChecking = true;
       _tuyaError = null;
@@ -1321,9 +1585,6 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
         _tuyaConfigured = true;
         _tuyaStatus = status;
         _tuyaChecking = false;
-        if (_name.text.trim().isEmpty) {
-          _name.text = status.name;
-        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -1347,11 +1608,11 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
     }
     setState(() => _saving = true);
     try {
-      final isLamp = _type == EnvironmentDeviceType.lamp;
-      final useTuya = isLamp && _tuyaConfigured && _tuyaStatus != null;
+      final useTuya =
+          _choice.isTuya && _tuyaConfigured && _tuyaStatus != null;
       final initialBrightness = useTuya
           ? (_tuyaStatus!.brightnessPercent ?? 50).toDouble()
-          : _defaultCurrentValue(_type);
+          : _choice.defaultCurrentValue;
       final initialOn = useTuya ? (_tuyaStatus!.isOn ?? false) : false;
 
       await DeviceApi.create(
@@ -1385,12 +1646,7 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
 
   @override
   Widget build(BuildContext context) {
-    const types = [
-      EnvironmentDeviceType.lamp,
-      EnvironmentDeviceType.thermostat,
-      EnvironmentDeviceType.plug,
-      EnvironmentDeviceType.sensor,
-    ];
+    const choices = _DeviceChoice.values;
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -1466,16 +1722,22 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
               ),
             ),
             child: DropdownButtonHideUnderline(
-              child: DropdownButton<EnvironmentDeviceType>(
-                value: _type,
+              child: DropdownButton<_DeviceChoice>(
+                value: _choice,
                 isExpanded: true,
                 dropdownColor: AppColors.surfaceMuted,
                 style: const TextStyle(color: AppColors.textPrimary),
-                items: types
+                items: choices
                     .map(
-                      (t) => DropdownMenuItem(
-                        value: t,
-                        child: Text(t.categoryTitle),
+                      (c) => DropdownMenuItem(
+                        value: c,
+                        child: Row(
+                          children: [
+                            Icon(c.icon, size: 20, color: widget.accent),
+                            const SizedBox(width: 10),
+                            Text(c.label),
+                          ],
+                        ),
                       ),
                     )
                     .toList(),
@@ -1483,14 +1745,28 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
                     ? null
                     : (v) {
                         if (v != null) {
-                          setState(() => _type = v);
+                          final prev = _choice;
+                          setState(() {
+                            _choice = v;
+                            // Pre-fill the appliance label so the control-kind
+                            // sniffer resolves correctly — but never clobber a
+                            // name the user typed themselves.
+                            if (_name.text.trim().isEmpty ||
+                                _name.text.trim() == prev.defaultName) {
+                              _name.text = v.defaultName;
+                            }
+                            // Reset any stale Tuya probe state when switching.
+                            _tuyaStatus = null;
+                            _tuyaError = null;
+                            _tuyaConfigured = false;
+                          });
                           _maybeProbeTuya();
                         }
                       },
               ),
             ),
           ),
-          if (_type == EnvironmentDeviceType.lamp) ...[
+          if (_choice.isTuya) ...[
             const SizedBox(height: 12),
             _TuyaLampBanner(
               checking: _tuyaChecking,
@@ -1519,7 +1795,7 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
                     ),
                   )
                 : Text(
-                    _type == EnvironmentDeviceType.lamp &&
+                    _choice.isTuya &&
                             _tuyaConfigured &&
                             _tuyaStatus != null
                         ? 'Link & save'

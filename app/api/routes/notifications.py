@@ -94,13 +94,17 @@ def seed_today(
     """
     greetings = notification_service.generate_morning_greetings(session)
     routines = notification_service.generate_device_routine_reminders(session)
+    advice_habits = notification_service.generate_advice_habit_reminders(session)
     milestones = notification_service.generate_streak_milestones(session)
+    streak_risk = notification_service.generate_streak_risk_reminders(session)
     fired = notification_service.fire_due_notifications(session)
     expired = notification_service.expire_overdue(session)
     return {
         "morning_greetings": greetings,
         "device_routine_reminders": routines,
+        "advice_habit_reminders": advice_habits,
         "streak_milestones": milestones,
+        "streak_risk_reminders": streak_risk,
         "fired_now": fired,
         "expired": expired,
     }

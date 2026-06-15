@@ -75,4 +75,9 @@ class SessionService extends ChangeNotifier {
     await prefs.remove(_kAccessTokenKey);
     notifyListeners();
   }
+
+  /// Call after advice completion / notification confirm so dashboard streaks reload.
+  void notifyActivityChanged() {
+    notifyListeners();
+  }
 }

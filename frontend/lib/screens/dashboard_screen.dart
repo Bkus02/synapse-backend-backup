@@ -419,6 +419,7 @@ class _MainPageState extends State<MainPage> {
               name: name,
               environmentId: envId,
               dailyAdviceLog: List<bool>.of(flags),
+              weeklyStreakCount: entry.weeklyStreakCount,
               isCurrentUser: isMe,
             ),
           );
@@ -439,6 +440,8 @@ class _MainPageState extends State<MainPage> {
               dailyAdviceLog: isMe && myActivity != null
                   ? myActivity.activeFlags
                   : List<bool>.filled(_daysToShow, false),
+              weeklyStreakCount:
+                  isMe ? (myActivity?.weeklyStreakCount ?? 0) : 0,
               isCurrentUser: isMe,
             ),
           );
@@ -446,6 +449,26 @@ class _MainPageState extends State<MainPage> {
         if (family.length > 3) {
           family.removeRange(3, family.length);
         }
+      }
+
+      // The user may not be in the environment's top-streak feed yet. Always
+      // surface their own chain + streak so it shows next to the others.
+      if (!family.any((m) => m.isCurrentUser)) {
+        final myName =
+            (SessionService.instance.user?['full_name'] as String?)?.trim();
+        family.insert(
+          0,
+          _FamilyMemberProgress(
+            userId: myId,
+            name: (myName != null && myName.isNotEmpty) ? myName : myId,
+            environmentId: envId,
+            dailyAdviceLog: myActivity != null
+                ? List<bool>.of(myActivity.activeFlags)
+                : List<bool>.filled(_daysToShow, false),
+            weeklyStreakCount: myActivity?.weeklyStreakCount ?? 0,
+            isCurrentUser: true,
+          ),
+        );
       }
 
       if (mounted) {
@@ -651,13 +674,14 @@ class _MainPageState extends State<MainPage> {
                         durationMinutes: minutes,
                       );
                       if (!mounted) return;
+                      SessionService.instance.notifyActivityChanged();
                       final hh = startTime!.hour.toString().padLeft(2, '0');
                       final mm = startTime!.minute.toString().padLeft(2, '0');
                       ScaffoldMessenger.of(this.context).showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Reminder set: ${advice.title} at $hh:$mm '
-                            '($minutes min). Confirm from the bell when ready.',
+                            'Logged: ${advice.title} at $hh:$mm '
+                            '($minutes min). Streak updated.',
                           ),
                           behavior: SnackBarBehavior.floating,
                         ),
@@ -788,6 +812,24 @@ class _MainPageState extends State<MainPage> {
                   ),
                   const SizedBox(height: 8),
                   if (me != null) ...[
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.local_fire_department_rounded,
+                          color: AppColors.accent,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${me.weeklyStreakCount}-day streak',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                     StreakGeneWidget(
                       days: me.dailyAdviceLog,
                       progressionStep: _geneProgressStep,
@@ -1482,6 +1524,7 @@ class _FamilyMemberProgress {
     required this.name,
     required this.environmentId,
     required this.dailyAdviceLog,
+    required this.weeklyStreakCount,
     this.isCurrentUser = false,
   });
 
@@ -1490,13 +1533,5 @@ class _FamilyMemberProgress {
   final String environmentId;
   final bool isCurrentUser;
   final List<bool> dailyAdviceLog;
-
-  int get weeklyStreakCount {
-    final from = dailyAdviceLog.length >= 7 ? dailyAdviceLog.length - 7 : 0;
-    var total = 0;
-    for (var i = from; i < dailyAdviceLog.length; i++) {
-      if (dailyAdviceLog[i]) total += 1;
-    }
-    return total;
-  }
+  final int weeklyStreakCount;
 }

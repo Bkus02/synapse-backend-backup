@@ -31,6 +31,7 @@ from sqlalchemy import and_, text as sql_text
 from sqlmodel import Session, select
 
 from app.application.services import positive_advice_service
+from app.application.services.recommendation_catalog import ADVICE_CATALOG
 from app.core.models import (
     AdviceSchedule,
     BehaviorLog,
@@ -39,9 +40,17 @@ from app.core.models import (
     Notification,
     NotificationKind,
     NotificationStatus,
+    PositiveAdviceLog,
     User,
     UserDailyStreak,
 )
+
+# Reverse map "advice title" → advice_key so we can resolve an "Advice: <Title>"
+# habit row back to its catalog key (the habit name is the only link we keep).
+_ADVICE_TITLE_TO_KEY: dict[str, str] = {
+    str(item["title"]): key for key, item in ADVICE_CATALOG.items()
+}
+_ADVICE_HABIT_PREFIX = "Advice: "
 
 ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
 MORNING_GREETING_HOUR = 9  # local Istanbul time
@@ -216,15 +225,30 @@ def confirm(
         if sched_id is not None:
             sched = session.get(AdviceSchedule, int(sched_id))
             if sched is not None and sched.user_id == user_id:
+                # schedule_advice already logs on plan submit; avoid duplicates.
+                if sched.status != "completed":
+                    positive_advice_service.log_advice_completion(
+                        user_id=user_id,
+                        advice_key=sched.advice_key,
+                        duration_minutes=sched.duration_minutes,
+                        completed_at=_now_utc(),
+                        session=session,
+                    )
+                    sched.status = "completed"
+                    session.add(sched)
+                    positive_advice_service.recompute_daily_streak(user_id, session)
+        else:
+            # Habit-driven daily reminder (no schedule row). Log directly from
+            # the payload so the streak / flare advances on confirm.
+            advice_key = payload.get("advice_key")
+            if advice_key:
                 positive_advice_service.log_advice_completion(
                     user_id=user_id,
-                    advice_key=sched.advice_key,
-                    duration_minutes=sched.duration_minutes,
+                    advice_key=str(advice_key),
+                    duration_minutes=int(payload.get("duration_minutes", 0) or 0),
                     completed_at=_now_utc(),
                     session=session,
                 )
-                sched.status = "completed"
-                session.add(sched)
                 positive_advice_service.recompute_daily_streak(user_id, session)
 
     elif note.kind in {
@@ -531,6 +555,222 @@ def generate_device_routine_reminders(
         if initial == NotificationStatus.Fired:
             note.fired_at = now
             session.add(note)
+        created += 1
+    if created:
+        session.commit()
+    return created
+
+
+def _advice_key_for_habit(habit: Habit) -> str | None:
+    """Resolve the catalog advice_key behind an "Advice: <Title>" habit row."""
+    if not habit.name or not habit.name.startswith(_ADVICE_HABIT_PREFIX):
+        return None
+    title = habit.name[len(_ADVICE_HABIT_PREFIX):].strip()
+    return _ADVICE_TITLE_TO_KEY.get(title)
+
+
+def _typical_hour_and_duration(
+    user_id: str, advice_key: str, session: Session
+) -> tuple[int, int] | None:
+    """Most frequent local (Istanbul) hour and duration from past completions.
+
+    Returns ``None`` when the user has no logged completion for this advice.
+    """
+    logs = list(
+        session.exec(
+            select(PositiveAdviceLog).where(
+                PositiveAdviceLog.user_id == user_id,
+                PositiveAdviceLog.advice_key == advice_key,
+            )
+        )
+    )
+    if not logs:
+        return None
+
+    from collections import Counter
+
+    hour_counts: Counter[int] = Counter()
+    duration_counts: Counter[int] = Counter()
+    for log in logs:
+        ts = log.completed_at
+        if ts is None:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        local_hour = ts.astimezone(ISTANBUL_TZ).hour
+        hour_counts[local_hour] += 1
+        if log.duration_minutes and log.duration_minutes > 0:
+            duration_counts[int(log.duration_minutes)] += 1
+
+    if not hour_counts:
+        return None
+    # most_common breaks ties by insertion; good enough for a reminder hour.
+    hour = hour_counts.most_common(1)[0][0]
+    duration = duration_counts.most_common(1)[0][0] if duration_counts else 30
+    return hour, duration
+
+
+def generate_advice_habit_reminders(
+    session: Session,
+    *,
+    target_day: date | None = None,
+) -> int:
+    """Plan a daily confirm prompt for every active advice-based habit.
+
+    A positive advice becomes a Habit once it has >= 10 logs (see
+    ``positive_advice_service.ADVICE_HABIT_LOG_THRESHOLD``). From then on we
+    remind the user at the hour they most often complete it, so the streak
+    keeps its momentum. The reminder carries the ``advice_key`` directly;
+    confirming it logs a completion and recomputes the streak.
+    """
+    target_day = target_day or _today_istanbul()
+    now = _now_utc()
+    today_start = _local_to_utc(target_day, 0, 0)
+    created = 0
+
+    habits = list(
+        session.exec(
+            select(Habit).where(
+                and_(
+                    Habit.is_active == True,  # noqa: E712
+                    Habit.name.like(f"{_ADVICE_HABIT_PREFIX}%"),  # type: ignore[attr-defined]
+                )
+            )
+        )
+    )
+    for h in habits:
+        advice_key = _advice_key_for_habit(h)
+        if advice_key is None:
+            continue
+        # Already done today? No nudge needed.
+        if _advice_done_today(h.user_id, advice_key, today_start, session):
+            continue
+        typical = _typical_hour_and_duration(h.user_id, advice_key, session)
+        if typical is None:
+            continue
+        hour, duration = typical
+        scheduled = _local_to_utc(target_day, hour, 0)
+        if _exists(
+            session,
+            user_id=h.user_id,
+            kind=NotificationKind.AdviceReminder.value,
+            scheduled_for=scheduled,
+            payload_key="habit_id",
+            payload_value=h.id,
+        ):
+            continue
+
+        title_label = h.name[len(_ADVICE_HABIT_PREFIX):].strip() or advice_key
+        # Reminders are informational nudges — no confirmation required.
+        initial = (
+            NotificationStatus.Fired if scheduled <= now else NotificationStatus.Pending
+        )
+        note = _create_notification(
+            session,
+            user_id=h.user_id,
+            kind=NotificationKind.AdviceReminder,
+            title=f"{title_label} reminder",
+            body=(
+                f"You haven't done {title_label.lower()} yet today. "
+                f"You usually do it around {hour:02d}:00 — want to?"
+            ),
+            scheduled_for=scheduled,
+            requires_action=False,
+            payload={
+                "habit_id": h.id,
+                "advice_key": advice_key,
+                "advice_title": title_label,
+                "duration_minutes": duration,
+                "hour": hour,
+                "source": "habit",
+            },
+            initial_status=initial,
+        )
+        if initial == NotificationStatus.Fired:
+            note.fired_at = now
+            session.add(note)
+        created += 1
+    if created:
+        session.commit()
+    return created
+
+
+def _advice_done_today(
+    user_id: str, advice_key: str, today_start_utc: datetime, session: Session
+) -> bool:
+    """True when the user already logged ``advice_key`` since local midnight."""
+    row = session.exec(
+        select(PositiveAdviceLog.id).where(
+            PositiveAdviceLog.user_id == user_id,
+            PositiveAdviceLog.advice_key == advice_key,
+            PositiveAdviceLog.completed_at >= today_start_utc,
+        )
+    ).first()
+    return row is not None
+
+
+def generate_streak_risk_reminders(
+    session: Session,
+    *,
+    target_day: date | None = None,
+) -> int:
+    """Warn users with an active streak who haven't qualified today yet.
+
+    A day "qualifies" once the user logs
+    ``positive_advice_service.QUALIFYING_ADVICES_PER_DAY`` distinct advices.
+    Anyone with ``current_streak >= 1`` who is still short gets a single
+    informational nudge ("finish N more to keep your streak"). Fired
+    immediately so it surfaces right away; deduped per day via a fixed
+    evening ``scheduled_for``.
+    """
+    target_day = target_day or _today_istanbul()
+    now = _now_utc()
+    today_start = _local_to_utc(target_day, 0, 0)
+    scheduled = _local_to_utc(target_day, 20, 0)  # stable per-day slot for dedup
+    needed = positive_advice_service.QUALIFYING_ADVICES_PER_DAY
+    created = 0
+
+    for r in session.exec(select(UserDailyStreak)):
+        if r.current_streak < 1:
+            continue
+        keys_today = {
+            k
+            for k in session.exec(
+                select(PositiveAdviceLog.advice_key).where(
+                    PositiveAdviceLog.user_id == r.user_id,
+                    PositiveAdviceLog.completed_at >= today_start,
+                )
+            )
+        }
+        if len(keys_today) >= needed:
+            continue  # already safe today
+        if _exists(
+            session,
+            user_id=r.user_id,
+            kind=NotificationKind.StreakRisk.value,
+            scheduled_for=scheduled,
+        ):
+            continue
+
+        remaining = needed - len(keys_today)
+        plural = "advice" if remaining == 1 else "advices"
+        note = _create_notification(
+            session,
+            user_id=r.user_id,
+            kind=NotificationKind.StreakRisk,
+            title=f"Don't lose your {r.current_streak}-day streak",
+            body=(
+                f"You haven't completed today's positive advices yet. "
+                f"Finish {remaining} more {plural} today to keep your "
+                f"{r.current_streak}-day streak alive."
+            ),
+            scheduled_for=scheduled,
+            requires_action=False,
+            payload={"streak": r.current_streak, "remaining": remaining},
+            initial_status=NotificationStatus.Fired,
+        )
+        note.fired_at = now
+        session.add(note)
         created += 1
     if created:
         session.commit()

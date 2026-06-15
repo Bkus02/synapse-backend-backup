@@ -52,9 +52,11 @@ extension HabitKindX on Habit {
     return HabitKind.positive;
   }
 
-  /// Trim the prefix so the UI shows a clean title.
+  /// Trim the prefix so the UI shows a clean title, and render the canonical
+  /// "@HH" hour token as a readable clock time (e.g. "@13" → "13:00").
   String get displayName {
     final n = name;
+    var stripped = n;
     for (final prefix in const [
       'Routine: ',
       'Device: ',
@@ -62,10 +64,14 @@ extension HabitKindX on Habit {
       'Custom: ',
     ]) {
       if (n.startsWith(prefix)) {
-        return n.substring(prefix.length);
+        stripped = n.substring(prefix.length);
+        break;
       }
     }
-    return n;
+    return stripped.replaceAllMapped(
+      RegExp(r'@(\d{1,2})\b'),
+      (m) => '${m.group(1)!.padLeft(2, '0')}:00',
+    );
   }
 
   /// Compact tag rendered next to the title (e.g. "Routine", "Sequence", "Manual").

@@ -41,6 +41,7 @@ class UserApi {
     required int weight,
     required int age,
     required String location,
+    required String gender,
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users');
     final body = jsonEncode(<String, dynamic>{
@@ -51,6 +52,7 @@ class UserApi {
       'weight': weight,
       'age': age,
       'location': location,
+      'gender': gender,
     });
 
     final response = await http.post(
@@ -111,6 +113,7 @@ class UserApi {
     required String location,
     String? newPassword,
     String? avatarKey,
+    String? gender,
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId');
     final body = <String, dynamic>{
@@ -123,6 +126,9 @@ class UserApi {
     };
     if (avatarKey != null) {
       body['avatar_key'] = avatarKey;
+    }
+    if (gender != null && gender.isNotEmpty) {
+      body['gender'] = gender;
     }
     if (newPassword != null && newPassword.isNotEmpty) {
       body['password'] = newPassword;

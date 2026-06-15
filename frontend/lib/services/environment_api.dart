@@ -140,6 +140,20 @@ class EnvironmentApi {
     throw UserApiException('Could not load members (${response.statusCode})');
   }
 
+  static Future<void> removeMember({
+    required String environmentId,
+    required String userId,
+  }) async {
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/environments/$environmentId/members/$userId',
+    );
+    final response = await http.delete(uri, headers: _headers);
+    if (response.statusCode == 200) {
+      return;
+    }
+    throw UserApiException(UserApi.errorMessageFromResponse(response));
+  }
+
   static Map<String, String> get _headers =>
       SessionService.instance.authHeaders();
 }

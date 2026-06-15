@@ -171,6 +171,29 @@ def add_user_to_environment(environment_id: str, user_id: str, session: Session)
     return membership
 
 
+def remove_user_from_environment(
+    environment_id: str, user_id: str, session: Session
+) -> dict[str, str]:
+    env = session.get(Environment, environment_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail="Environment bulunamadi.")
+    if env.admin_id == user_id:
+        raise HTTPException(
+            status_code=400, detail="Environment admini cikarilamaz."
+        )
+    membership = session.exec(
+        select(UserEnvironment).where(
+            UserEnvironment.user_id == user_id,
+            UserEnvironment.environment_id == environment_id,
+        )
+    ).first()
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Kullanici bu environment icinde degil.")
+    session.delete(membership)
+    _commit_or_400(session, "Kullanici environment'ten cikarilamadi.")
+    return {"message": "Kullanici environment'ten cikarildi."}
+
+
 def _get_env_or_404(environment_id: str, session: Session) -> Environment:
     env = session.get(Environment, environment_id)
     if env is None:
@@ -743,7 +766,9 @@ def login_user(payload: LoginRequest, session: Session) -> User:
 
 def create_user(payload: UserCreate, session: Session) -> User:
     data = payload.model_dump(exclude_unset=True)
-    gender = data.pop("gender", None)
+    # Persist gender on the user row (used by cold-start + recommendation
+    # cohort). Keep the value for provisioning below.
+    gender = data.get("gender")
     plain_password = _extract_plain_password(data)
     if plain_password:
         data["password_hash"] = hash_password(plain_password)
@@ -1105,12 +1130,89 @@ _DEVICE_ROUTINE_PREFIX = "Routine: "
 _DEVICE_HABIT_ENTER_THRESHOLD = 0.60
 _DEVICE_HABIT_EXIT_THRESHOLD = 0.45
 
-# A (device, action) ritmi → habit eşikleri. Aynı saat diliminde son
-# ``ROUTINE_LOOKBACK_DAYS`` gün içinde ≥``ROUTINE_MIN_DAYS`` ayrı günde
-# tetiklenen aksiyonlar otomatik olarak rutin habit'e dönüşür.
-ROUTINE_MIN_DAYS: int = 10
+# A (device, action) ritmi → habit. Aynı saat diliminde son
+# ``ROUTINE_LOOKBACK_DAYS`` gün içindeki HER takvim günü bir "fırsat" sayılır;
+# o gün aksiyon yapıldıysa 1, yapılmadıysa 0. Habit olasılığı, bugüne yakın
+# günleri daha ağır tutan recency-ağırlıklı ortalamadır (sequence mining'den
+# BAĞIMSIZ, ayrı bir konu):
+#
+#     P = Σ(w_d)  [aktif günler] / Σ(w_d)  [penceredeki tüm günler]
+#     w_d = e^(-λ · Δgün)        λ = 0.0077  → yarı-ömür ≈ 90 gün
+#
+# Histerezis: P ≥ 0.60 → habit aktifleşir, P < 0.45 → pasifleşir ("unutulur").
+ROUTINE_DECAY_LAMBDA: float = 0.0077  # yarı-ömür ≈ 90 gün (math.log(2)/0.0077)
+ROUTINE_MIN_ACTIVE_DAYS: int = 5  # gürültü filtresi: en az bu kadar aktif gün
 ROUTINE_LOOKBACK_DAYS: int = 30
-ROUTINE_BUCKET_HOURS: int = 1  # 1-saatlik dilimler
+# Erken/geç açılma yumuşatma payı: bu kadar dakika içindeki açılışlar AYNI
+# rutin sayılır (saat sınırını geçse bile, örn. 06:55 ↔ 07:05). Sabit
+# saat-kovası yerine ±dakika kümeleme kullanılır.
+ROUTINE_SMOOTHING_MINUTES: int = 10
+
+
+def _recency_weighted_active_ratio(
+    active_dates: set[date],
+    *,
+    today: date,
+    lookback_days: int = ROUTINE_LOOKBACK_DAYS,
+    lam: float = ROUTINE_DECAY_LAMBDA,
+) -> float:
+    """Tek cihaz rutini için zaman-ağırlıklı alışkanlık gücü.
+
+    Pencere: ilk aktif günden ``today``'e kadar (en fazla ``lookback_days``).
+    Penceredeki her gün bir fırsattır; o gün aksiyon varsa katkı ``w_d`` kadar.
+
+        P = Σ(w_d · yapildi_d) / Σ(w_d)   ,   w_d = exp(-lam · Δgün)
+
+    Örn. son 10 günün 9'unda yapıldıysa P ≈ 0.90; kullanım seyrekleşip
+    durdukça yeni "0" günleri ağır bastığından P düşer ve habit unutulur.
+    """
+    import math
+
+    if not active_dates:
+        return 0.0
+    window_start = max(min(active_dates), today - timedelta(days=lookback_days - 1))
+    num = 0.0
+    den = 0.0
+    day = window_start
+    one_day = timedelta(days=1)
+    while day <= today:
+        weight = math.exp(-lam * (today - day).days)
+        den += weight
+        if day in active_dates:
+            num += weight
+        day += one_day
+    return num / den if den > 0 else 0.0
+
+
+def _circular_minute_distance(a: int, b: int) -> int:
+    """İki günün-içi dakika değeri arasındaki en kısa (gün döngüsel) mesafe."""
+    diff = abs(a - b) % (24 * 60)
+    return min(diff, 24 * 60 - diff)
+
+
+def _best_time_cluster(
+    events: list[tuple[date, int]],
+    tol_minutes: int = ROUTINE_SMOOTHING_MINUTES,
+) -> tuple[int, set[date]]:
+    """En çok ayrı günü ``±tol_minutes`` içinde toplayan zaman kümesini bulur.
+
+    ``events`` = (tarih, günün_dakikası) listesi. Erken/geç açılmalar (örn.
+    06:55 ve 07:05) tek bir rutin altında birleşsin diye sabit saat-kovası
+    yerine kayan ±dakika penceresi kullanılır. Döner: (çapa_dakika, gün_kümesi).
+    """
+    if not events:
+        return 0, set()
+    candidate_minutes = sorted({m for _, m in events})
+    best_anchor = candidate_minutes[0]
+    best_dates: set[date] = set()
+    for center in candidate_minutes:
+        dates = {
+            d for d, m in events if _circular_minute_distance(m, center) <= tol_minutes
+        }
+        if len(dates) > len(best_dates):
+            best_dates = dates
+            best_anchor = center
+    return best_anchor, best_dates
 
 
 def _sync_device_habits_from_matrix(
@@ -1178,38 +1280,47 @@ def _sync_device_habits_from_matrix(
     return upserted
 
 
-def detect_device_routines(session: Session) -> int:
-    """Turn single-action repeats into Habit rows ("Routine: AC TurnOn ~18:00").
+def detect_device_routines(
+    session: Session,
+    *,
+    reference_time: datetime | None = None,
+) -> int:
+    """Tek-aksiyon ritimlerini ("Routine: Oven TurnOn @18") Habit'e çevirir.
 
-    Sequence miner sadece A→B çiftlerini yakaladığı için "her sabah 8'de
-    klima açma" gibi tek-aksiyon ritimleri kaçırılıyor. Burada her
-    ``(user, device, action)`` için son ``ROUTINE_LOOKBACK_DAYS`` günde
-    aynı saat diliminde tekrarlanan aksiyonları sayıyor, ``ROUTINE_MIN_DAYS``
-    eşiğini aşanları ``habits`` tablosuna upsert ediyoruz.
+    Sequence miner sadece A→B çiftlerini yakaladığı için "her sabah 7'de
+    lambayı açma" gibi tek cihaz–tek kullanıcı ritimleri burada ele alınır.
+    Her ``(user, device, action)`` için en yoğun saat dilimindeki aktif günler
+    bulunur ve olasılık ``_recency_weighted_active_ratio`` ile zaman-ağırlıklı
+    ortalama olarak hesaplanır. Histerezis (giriş ≥0.60, çıkış <0.45) ile
+    habit aktif/pasif yapılır — kullanım durunca P düşer ve habit "unutulur".
+
+    ``reference_time`` test/senaryo için "bugün"ü sabitlemeye yarar.
     """
     from collections import defaultdict
 
-    cutoff = datetime.now(UTC) - timedelta(days=ROUTINE_LOOKBACK_DAYS)
+    now = reference_time or datetime.now(UTC)
+    today = now.date()
+    cutoff = now - timedelta(days=ROUTINE_LOOKBACK_DAYS)
     logs = list(
         session.exec(
-            select(BehaviorLog).where(BehaviorLog.event_time >= cutoff)
+            select(BehaviorLog).where(
+                BehaviorLog.event_time >= cutoff,
+                BehaviorLog.event_time <= now,
+            )
         )
     )
     if not logs:
         return 0
 
-    # (user, device, action) -> {bucket_hour: set(date)}
-    grouped: dict[tuple[str, int, str], dict[int, set]] = defaultdict(
-        lambda: defaultdict(set)
-    )
+    # (user, device, action) -> [(tarih, günün_dakikası), ...]
+    grouped: dict[tuple[str, int, str], list[tuple[date, int]]] = defaultdict(list)
     for log in logs:
         if log.device_id is None:
             continue
         key = (log.user_id, log.device_id, log.action)
-        bucket = (log.event_time.hour // ROUTINE_BUCKET_HOURS) * ROUTINE_BUCKET_HOURS
-        grouped[key][bucket].add(log.event_time.date())
+        minute_of_day = log.event_time.hour * 60 + log.event_time.minute
+        grouped[key].append((log.event_time.date(), minute_of_day))
 
-    # Eski rutin habit'leri temizle (yenilenecekler upsert, kalanlar pasifleşir).
     existing_routines = list(
         session.exec(
             select(Habit).where(Habit.name.like(f"{_DEVICE_ROUTINE_PREFIX}%"))
@@ -1221,34 +1332,36 @@ def detect_device_routines(session: Session) -> int:
     touched: set[tuple[str, str]] = set()
 
     upserted = 0
-    for (uid, device_id, action), buckets in grouped.items():
-        # En yoğun saat dilimi
-        best_bucket, best_days = max(
-            ((b, len(ds)) for b, ds in buckets.items()),
-            key=lambda x: x[1],
-            default=(0, 0),
+    for (uid, device_id, action), events in grouped.items():
+        # ±10 dk yumuşatma ile en yoğun zaman kümesi ve o kümedeki aktif günler.
+        anchor_minute, best_dates = _best_time_cluster(
+            events, ROUTINE_SMOOTHING_MINUTES
         )
-        if best_days < ROUTINE_MIN_DAYS:
+        if len(best_dates) < ROUTINE_MIN_ACTIVE_DAYS:
             continue
+
+        # Recency-ağırlıklı alışkanlık gücü (sequence mining'den bağımsız).
+        prob = min(0.99, _recency_weighted_active_ratio(best_dates, today=today))
+        prob_dec = Decimal(str(round(prob, 2)))
 
         device = session.get(Device, device_id)
         device_name = device.name if device and device.name else f"Device {device_id}"
         action_label = str(action).replace("_", " ").title()
         # Name shape: "Routine: <device> <TurnOn|TurnOff> @HH"
         # The "@HH" suffix is the canonical hour token the notification
-        # service parses to know when to fire today's confirm prompt.
+        # service parses to know when to fire today's confirm prompt; çapanın
+        # en yakın saatine yuvarlanır (±10 dk küme merkezinden).
+        name_hour = int(round(anchor_minute / 60.0)) % 24
         name = (
             f"{_DEVICE_ROUTINE_PREFIX}{device_name} {action_label} "
-            f"@{best_bucket:02d}"
+            f"@{name_hour:02d}"
         )
-        touched.add((uid, name))
-
-        # 10 günde 0.60, her ek gün +0.03, üst sınır 0.95
-        prob = min(0.95, 0.55 + (best_days - ROUTINE_MIN_DAYS + 1) * 0.03)
-        prob_dec = Decimal(str(round(prob, 2)))
 
         habit = by_name.get((uid, name))
         if habit is None:
+            # Yeni habit yalnızca giriş eşiğini aşınca oluşur.
+            if prob < _DEVICE_HABIT_ENTER_THRESHOLD:
+                continue
             habit = Habit(
                 user_id=uid,
                 name=name,
@@ -1259,12 +1372,17 @@ def detect_device_routines(session: Session) -> int:
             )
             session.add(habit)
         else:
+            # Histerezis: skoru daima güncelle; aktiflik eşiklere göre değişir.
             habit.probability_score = prob_dec
-            habit.is_active = True
+            if prob >= _DEVICE_HABIT_ENTER_THRESHOLD:
+                habit.is_active = True
+            elif prob < _DEVICE_HABIT_EXIT_THRESHOLD:
+                habit.is_active = False
             session.add(habit)
+        touched.add((uid, name))
         upserted += 1
 
-    # Dokunulmayan eski rutinleri pasifleştir (siliyoruz değil — geçmiş kalsın).
+    # Bu turda hiç görülmeyen eski rutinleri pasifleştir (siliyoruz değil).
     for (uid_name), habit in by_name.items():
         if uid_name not in touched and habit.is_active:
             habit.is_active = False

@@ -38,6 +38,7 @@ class UserPublic(SQLModel):
     age: int | None = None
     location: str | None = None
     avatar_key: str | None = None
+    gender: str | None = None
 
 
 class LoginResponse(SQLModel):
@@ -57,6 +58,7 @@ class UserUpdate(SQLModel):
     age: int | None = None
     location: str | None = None
     avatar_key: str | None = None
+    gender: str | None = None
 
 
 class EnvironmentCreate(SQLModel):

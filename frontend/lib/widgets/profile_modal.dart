@@ -69,6 +69,12 @@ class _ProfileSheetState extends State<_ProfileSheet> {
   late final TextEditingController _locationCtrl;
 
   late String _avatarKey;
+  String? _gender; // 'Erkek' | 'Kadın'
+
+  static const _genderOptions = <Map<String, String>>[
+    {'key': 'Erkek', 'label': 'Male'},
+    {'key': 'Kadın', 'label': 'Female'},
+  ];
 
   bool _saving = false;
 
@@ -95,6 +101,8 @@ class _ProfileSheetState extends State<_ProfileSheet> {
     final rawAvatar = u?['avatar_key']?.toString().trim();
     _avatarKey =
         (rawAvatar != null && rawAvatar.isNotEmpty) ? rawAvatar : 'person';
+    final rawGender = u?['gender']?.toString().trim();
+    _gender = (rawGender == 'Erkek' || rawGender == 'Kadın') ? rawGender : null;
   }
 
   @override
@@ -151,6 +159,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
         location: _locationCtrl.text.trim(),
         newPassword: _passwordCtrl.text.isEmpty ? null : _passwordCtrl.text,
         avatarKey: _avatarKey,
+        gender: _gender,
       );
       await SessionService.instance.setUser(updated);
       _passwordCtrl.clear();
@@ -364,6 +373,28 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                   decoration: _decoration('Location'),
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _gender,
+                  dropdownColor: AppColors.surface,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  decoration: _decoration('Gender'),
+                  items: _genderOptions
+                      .map(
+                        (g) => DropdownMenuItem<String>(
+                          value: g['key'],
+                          child: Text(
+                            g['label']!,
+                            style:
+                                const TextStyle(color: AppColors.textPrimary),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(() => _gender = v),
                 ),
                 const SizedBox(height: 24),
                 SizedBox(
