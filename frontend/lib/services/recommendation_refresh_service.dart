@@ -17,7 +17,6 @@ class RecommendationRefreshService extends ChangeNotifier {
   static const burstWindow = Duration(seconds: 90);
 
   Recommendation? _active;
-  bool _loading = false;
   Timer? _steadyTimer;
   Timer? _burstTimer;
   DateTime? _burstUntil;
@@ -25,7 +24,6 @@ class RecommendationRefreshService extends ChangeNotifier {
   bool _attached = false;
 
   Recommendation? get active => _active;
-  bool get loading => _loading;
   bool get hasActive => _active != null;
 
   void attach() {
@@ -56,7 +54,6 @@ class RecommendationRefreshService extends ChangeNotifier {
     _burstTimer = null;
     _burstUntil = null;
     _active = null;
-    _loading = false;
     _inFlight = false;
     notifyListeners();
   }
@@ -95,24 +92,19 @@ class RecommendationRefreshService extends ChangeNotifier {
     }
     if (_inFlight) return;
     _inFlight = true;
-    final wasLoading = _loading;
-    if (!wasLoading) {
-      _loading = true;
-      notifyListeners();
-    }
     try {
       final rec = await RecommendationApi.getActive();
-      final changed = rec?.id != _active?.id;
-      _active = rec;
-      if (changed) notifyListeners();
+      final hadActive = _active != null;
+      final hasActive = rec != null;
+      final idChanged = rec?.id != _active?.id;
+      if (idChanged || hadActive != hasActive) {
+        _active = rec;
+        notifyListeners();
+      }
     } catch (_) {
       // Son bilinen öneriyi koru; ağ hatalarında UI sessiz kalır.
     } finally {
       _inFlight = false;
-      if (_loading) {
-        _loading = false;
-        notifyListeners();
-      }
     }
   }
 }

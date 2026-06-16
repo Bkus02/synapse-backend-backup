@@ -277,6 +277,32 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     );
   }
 
+  void _openAddMemberSheet() {
+    if (!_isAdmin) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _AddMemberSheet(
+        accent: AppColors.accent,
+        environmentId: widget.environment.id,
+        onInvited: (message) {
+          Navigator.pop(ctx);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   bool get _isAdmin {
     final uid = SessionService.instance.user?['id'] as String?;
     final aid = widget.environment.adminId;
@@ -688,12 +714,27 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              if (_loadingPeople)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+              Row(
+                children: [
+                  if (_loadingPeople)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  if (_isAdmin) ...[
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      onPressed: _openAddMemberSheet,
+                      icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                      label: const Text('Add member'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.accent,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
           ),
           if (_peopleError != null)
@@ -1941,6 +1982,149 @@ class _TuyaLampBanner extends StatelessWidget {
         border: Border.all(color: border),
       ),
       child: child,
+    );
+  }
+}
+
+/// Admin sheet: invite a member by their user ID. An invitation notification
+/// is sent to the target user; they join only after approving it.
+class _AddMemberSheet extends StatefulWidget {
+  const _AddMemberSheet({
+    required this.accent,
+    required this.environmentId,
+    required this.onInvited,
+  });
+
+  final Color accent;
+  final String environmentId;
+  final void Function(String message) onInvited;
+
+  @override
+  State<_AddMemberSheet> createState() => _AddMemberSheetState();
+}
+
+class _AddMemberSheetState extends State<_AddMemberSheet> {
+  final _userId = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _userId.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final id = _userId.text.trim().toUpperCase();
+    if (id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a user ID (e.g. P0000001)'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final message = await EnvironmentApi.inviteMember(
+        environmentId: widget.environmentId,
+        userId: id,
+      );
+      if (mounted) {
+        widget.onInvited(message);
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.person_add_alt_1_rounded, color: widget.accent),
+              const SizedBox(width: 10),
+              Text(
+                'Add member',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Enter the user ID. An invitation will be sent; they join after '
+            'they approve it from their notifications.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _userId,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            style: const TextStyle(color: AppColors.textPrimary),
+            onSubmitted: (_) => _saving ? null : _submit(),
+            decoration: InputDecoration(
+              labelText: 'User ID',
+              hintText: 'P0000001',
+              labelStyle: const TextStyle(color: AppColors.textSecondary),
+              enabledBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: AppColors.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: widget.accent),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton(
+              onPressed: _saving ? null : _submit,
+              style: FilledButton.styleFrom(backgroundColor: widget.accent),
+              child: _saving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.textOnAccent,
+                      ),
+                    )
+                  : const Text('Send invitation'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

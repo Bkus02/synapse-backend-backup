@@ -209,3 +209,20 @@ def add_user_to_environment(
 ) -> UserEnvironment:
     smart_home_service.require_environment_admin(token_user_id, environment_id, session)
     return smart_home_service.add_user_to_environment(environment_id, payload.user_id, session)
+
+
+@router.post("/{environment_id}/invite")
+def invite_user_to_environment(
+    environment_id: str,
+    payload: AddUserToEnvironmentRequest,
+    token_user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
+    """Admin, bir kullaniciyi ID'sine gore davet eder.
+
+    Hedef kullaniciya bir bildirim gonderilir; kullanici onaylarsa environment'e
+    katilir (bkz. notification_service.confirm — kind=environment_invite).
+    """
+    return smart_home_service.invite_user_to_environment(
+        environment_id, token_user_id, payload.user_id, session
+    )

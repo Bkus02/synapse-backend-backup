@@ -206,9 +206,12 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
               .toList();
         });
         SessionService.instance.notifyActivityChanged();
+        final snackText = n.kind == 'environment_invite'
+            ? 'Joined ${n.payload['environment_name'] ?? 'the environment'}'
+            : 'Confirmed: ${n.title}';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Confirmed: ${n.title}'),
+            content: Text(snackText),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -367,6 +370,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return Icons.whatshot_rounded;
       case 'safety_anomaly':
         return Icons.warning_amber_rounded;
+      case 'environment_invite':
+        return Icons.group_add_rounded;
       default:
         return Icons.notifications_rounded;
     }
@@ -393,6 +398,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return 'Device habits';
       case 'streak_milestone':
         return 'Milestones';
+      case 'environment_invite':
+        return 'Invitations';
       default:
         return 'Other';
     }
@@ -405,6 +412,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       case 'device_routine':
       case 'sequence_trigger':
         return 'Confirm';
+      case 'environment_invite':
+        return 'Join';
       default:
         return 'OK';
     }
@@ -414,6 +423,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
     switch (kind) {
       case 'advice_reminder':
         return 'Skip';
+      case 'environment_invite':
+        return 'Decline';
       default:
         return 'Not now';
     }
@@ -426,8 +437,18 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
     final media = MediaQuery.of(context);
     final sheetHeight = media.size.height * 0.87;
 
+    final pendingInvites = _notifications
+        .where(
+          (n) =>
+              n.kind == 'environment_invite' &&
+              n.status != 'expired' &&
+              !n.isClosed,
+        )
+        .toList();
+
+    // Environment invites have their own section below; keep the feed clean.
     final visible = _notifications
-        .where((n) => n.status != 'expired')
+        .where((n) => n.status != 'expired' && n.kind != 'environment_invite')
         .toList();
 
     // Group by section header
@@ -445,6 +466,11 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       'Milestones',
       'Other',
     ];
+    final feedSections = [
+      ...sectionOrder.where(grouped.containsKey),
+      ...grouped.keys.where((k) => !sectionOrder.contains(k)),
+    ];
+    final hasFeedContent = feedSections.isNotEmpty;
 
     return Padding(
       padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
@@ -535,7 +561,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                               ),
                             ),
                           )
-                        else if (visible.isEmpty)
+                        else if (!hasFeedContent)
                           Padding(
                             padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                             child: Text(
@@ -549,9 +575,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                             ),
                           )
                         else
-                          ...sectionOrder
-                              .where((s) => grouped[s] != null)
-                              .expand((s) sync* {
+                          ...feedSections.expand((s) sync* {
                             yield Padding(
                               padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
                               child: Text(
@@ -569,6 +593,54 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                               yield _notificationCard(n);
                             }
                           }),
+                        const SizedBox(height: 14),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Text(
+                            'Invitations',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (_loadingFeed)
+                          const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else if (_feedError != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Text(
+                              _feedError!,
+                              style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                              ),
+                            ),
+                          )
+                        else if (pendingInvites.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                            child: Text(
+                              SessionService.instance.user == null
+                                  ? 'Sign in to see environment invitations.'
+                                  : 'No pending invitations.',
+                              style: TextStyle(
+                                color: AppColors.textPrimary.withValues(alpha: 0.45),
+                                fontSize: 14,
+                              ),
+                            ),
+                          )
+                        else
+                          ...pendingInvites.map(_inviteCard),
                         const SizedBox(height: 14),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -834,6 +906,109 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   ],
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inviteCard(AppNotification n) {
+    final busy = _busyNotificationIds.contains(n.id);
+    final envName =
+        (n.payload['environment_name'] as String?)?.trim().isNotEmpty == true
+            ? n.payload['environment_name'] as String
+            : (n.payload['environment_id'] as String?) ?? 'an environment';
+    final envId = n.payload['environment_id'] as String?;
+    final inviter =
+        (n.payload['inviter_name'] as String?)?.trim().isNotEmpty == true
+            ? n.payload['inviter_name'] as String
+            : (n.payload['inviter_id'] as String?) ?? 'Someone';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Card(
+        color: widget.cardColor,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.group_add_rounded,
+                    color: widget.accent,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Environment invitation',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$inviter invited you to join "$envName"${envId != null ? ' ($envId)' : ''}.',
+                style: TextStyle(
+                  color: AppColors.textPrimary.withValues(alpha: 0.72),
+                  fontSize: 14,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _timeLabel(n.firedAt ?? n.scheduledFor),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: busy ? null : () => _dismissNotification(n),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary,
+                        side: const BorderSide(color: AppColors.border),
+                      ),
+                      child: const Text('Decline'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: busy ? null : () => _confirmNotification(n),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: widget.accent,
+                      ),
+                      child: busy
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.textPrimary,
+                              ),
+                            )
+                          : const Text('Join'),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

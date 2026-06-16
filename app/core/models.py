@@ -485,6 +485,7 @@ class NotificationKind(str, Enum):
     StreakMilestone = "streak_milestone"
     StreakRisk = "streak_risk"
     SafetyAnomaly = "safety_anomaly"
+    EnvironmentInvite = "environment_invite"
 
 
 class NotificationStatus(str, Enum):

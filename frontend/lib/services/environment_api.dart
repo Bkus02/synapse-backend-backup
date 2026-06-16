@@ -126,6 +126,23 @@ class EnvironmentApi {
     throw UserApiException(UserApi.errorMessageFromResponse(response));
   }
 
+  /// Admin invites a user by ID. The target user receives a notification and
+  /// joins the environment only after they approve it.
+  static Future<String> inviteMember({
+    required String environmentId,
+    required String userId,
+  }) async {
+    final uri =
+        Uri.parse('${ApiConfig.baseUrl}/environments/$environmentId/invite');
+    final body = jsonEncode(<String, dynamic>{'user_id': userId});
+    final response = await http.post(uri, headers: _headers, body: body);
+    if (response.statusCode == 200) {
+      final map = jsonDecode(response.body) as Map<String, dynamic>;
+      return (map['message'] as String?) ?? 'Davet gönderildi.';
+    }
+    throw UserApiException(UserApi.errorMessageFromResponse(response));
+  }
+
   static Future<List<EnvironmentMember>> listMembers(String environmentId) async {
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}/environments/$environmentId/members',

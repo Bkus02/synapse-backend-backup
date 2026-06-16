@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -58,24 +60,40 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage>
+    with WidgetsBindingObserver {
   int _selectedIndex = 0;
   String? _pendingOpenEnvironmentId;
   int _notificationBadgeCount = 0;
+  Timer? _badgeRefreshTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SessionService.instance.addListener(_onSessionChanged);
     RecommendationRefreshService.instance.addListener(_onRecommendationChanged);
     _refreshNotificationBadge();
+    _badgeRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshNotificationBadge(),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _badgeRefreshTimer?.cancel();
     SessionService.instance.removeListener(_onSessionChanged);
     RecommendationRefreshService.instance.removeListener(_onRecommendationChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshNotificationBadge();
+    }
   }
 
   void _onSessionChanged() {
@@ -339,10 +357,15 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() {
-      _loadingFamily = true;
-      _loadError = null;
-    });
+    final showInitialLoader = _family.isEmpty;
+    if (showInitialLoader) {
+      setState(() {
+        _loadingFamily = true;
+        _loadError = null;
+      });
+    } else if (_loadError != null) {
+      setState(() => _loadError = null);
+    }
 
     try {
       await SelectedEnvironmentService.instance.ensureLoaded();
@@ -776,12 +799,7 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
                       onReject: () => _respondToRecommendation(false),
                     ),
                     const SizedBox(height: 12),
-                  ] else if (_recService.loading &&
-                      SessionService.instance.hasToken)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 12),
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
+                  ],
                   Text(
                     'Community Progress',
                     style: theme.textTheme.titleMedium?.copyWith(

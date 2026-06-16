@@ -266,6 +266,25 @@ def confirm(
             )
             session.add(log)
 
+    elif note.kind == NotificationKind.EnvironmentInvite.value:
+        # Davet kabul edildi → kullaniciyi environment'e ekle.
+        env_id = payload.get("environment_id")
+        if env_id:
+            # Local import to avoid a circular import at module load time.
+            from fastapi import HTTPException
+
+            from app.application.services import smart_home_service
+
+            try:
+                smart_home_service.add_user_to_environment(
+                    str(env_id), user_id, session
+                )
+            except HTTPException as exc:
+                # 409 (zaten uye) gibi durumlarda daveti yine de kapat;
+                # environment silinmis (404) ise hatayi yukari ilet.
+                if exc.status_code != 409:
+                    raise
+
     note.status = NotificationStatus.Confirmed.value
     note.updated_at = _now_utc()
     session.add(note)

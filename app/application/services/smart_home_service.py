@@ -33,6 +33,9 @@ from app.core.models import (
     EnvironmentJoinRequest,
     Habit,
     HabitRecurrence,
+    Notification,
+    NotificationKind,
+    NotificationStatus,
     PositiveAdviceLog,
     Recommendation,
     RecommendationStatus,
@@ -170,6 +173,88 @@ def add_user_to_environment(environment_id: str, user_id: str, session: Session)
     _commit_or_400(session, "Kullanici environment'e eklenemedi.")
     session.refresh(membership)
     return membership
+
+
+def invite_user_to_environment(
+    environment_id: str, inviter_id: str, target_user_id: str, session: Session
+) -> dict[str, str]:
+    """Admin, bir kullaniciyi ID'sine gore environment'e davet eder.
+
+    Dogrudan eklemek yerine hedef kullaniciya bir bildirim (kind=
+    ``environment_invite``, requires_action) gonderir. Kullanici bildirimi
+    onaylarsa ``confirm()`` icinde ``add_user_to_environment`` calisir.
+    """
+    env = session.get(Environment, environment_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail="Environment bulunamadi.")
+    require_environment_admin(inviter_id, environment_id, session)
+
+    target = session.get(User, target_user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Bu ID ile bir kullanici bulunamadi.")
+
+    if target_user_id == env.admin_id:
+        raise HTTPException(status_code=400, detail="Kullanici zaten environment admini.")
+
+    existing = session.exec(
+        select(UserEnvironment).where(
+            UserEnvironment.user_id == target_user_id,
+            UserEnvironment.environment_id == environment_id,
+        )
+    ).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Kullanici zaten bu environment icinde.")
+
+    # Local import to avoid a circular import with notification_service.
+    from app.application.services import notification_service
+
+    # Ayni environment icin bekleyen bir davet varsa tekrar gondermeyelim.
+    pending_invites = list(
+        session.exec(
+            select(Notification).where(
+                Notification.user_id == target_user_id,
+                Notification.kind == NotificationKind.EnvironmentInvite.value,
+                Notification.status.in_(  # type: ignore[attr-defined]
+                    [NotificationStatus.Fired.value, NotificationStatus.Pending.value]
+                ),
+            )
+        )
+    )
+    for inv in pending_invites:
+        if (inv.payload or {}).get("environment_id") == environment_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Bu kullaniciya zaten bekleyen bir davet gonderildi.",
+            )
+
+    inviter = session.get(User, inviter_id)
+    inviter_name = (inviter.full_name if inviter else None) or inviter_id
+    env_name = env.name or environment_id
+    now = datetime.now(UTC)
+
+    note = notification_service._create_notification(  # noqa: SLF001
+        session,
+        user_id=target_user_id,
+        kind=NotificationKind.EnvironmentInvite,
+        title="Environment daveti",
+        body=(
+            f"{inviter_name}, seni \"{env_name}\" ({environment_id}) environment'ine "
+            "davet etti. Katilmak icin onayla."
+        ),
+        scheduled_for=now,
+        requires_action=True,
+        payload={
+            "environment_id": environment_id,
+            "environment_name": env_name,
+            "inviter_id": inviter_id,
+            "inviter_name": inviter_name,
+        },
+        initial_status=NotificationStatus.Fired,
+    )
+    note.fired_at = now
+    session.add(note)
+    _commit_or_400(session, "Davet gonderilemedi.")
+    return {"message": f"{target.full_name or target_user_id} kullanicisina davet gonderildi."}
 
 
 def remove_user_from_environment(
