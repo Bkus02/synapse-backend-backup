@@ -253,7 +253,7 @@ class _HabitsPageState extends State<HabitsPage> {
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       sliver: SliverList.separated(
         itemCount: habits.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, i) => _habitCard(habits[i], theme),
       ),
     );

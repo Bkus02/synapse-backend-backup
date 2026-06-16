@@ -71,10 +71,10 @@ class DeviceApi {
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/devices/$deviceId');
     final body = <String, dynamic>{
-      if (status != null) 'status': status,
-      if (currentValue != null) 'current_value': currentValue,
-      if (name != null) 'name': name,
-      if (room != null) 'room': room,
+      'status': ?status,
+      'current_value': ?currentValue,
+      'name': ?name,
+      'room': ?room,
     };
     final response = await http.patch(
       uri,

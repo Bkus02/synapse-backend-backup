@@ -376,7 +376,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: _gender,
+                  initialValue: _gender,
                   dropdownColor: AppColors.surface,
                   style: const TextStyle(color: AppColors.textPrimary),
                   decoration: _decoration('Gender'),
