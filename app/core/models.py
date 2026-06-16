@@ -50,6 +50,7 @@ class DeviceType(str, Enum):
     Thermostat = "Thermostat"
     Plug = "Plug"
     Sensor = "Sensor"
+    Vacuum = "Vacuum"
     Other = "Other"
 
 

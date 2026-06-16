@@ -9,7 +9,7 @@ from app.api.schemas import (
     UserPublic,
     UserUpdate,
 )
-from app.application.services import smart_home_service
+from app.application.services import device_recommendation_service, smart_home_service
 from app.application.services.recommendation_catalog import (
     describe_profile,
     pick_advices,
@@ -100,6 +100,32 @@ def get_personalized_advices(
         "weather": weather,
         "advices": advices,
     }
+
+
+@router.get("/{user_id}/vacuum-recommendation")
+def get_vacuum_recommendation(
+    user_id: str,
+    token_user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    """Robot supurge kullanim saati/sikligi onerisi (demografik peer-matching).
+
+    Kullanicinin yas/cinsiyet/sehir/BMI bilgisiyle anket veri setindeki en yakin
+    akran grubunu bulup en cok tercih edilen supurme zamanini doner. Profil
+    eksikse ``{"available": false}`` doner.
+    """
+    if user_id != token_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sadece kendi onerilerinizi gorebilirsiniz.",
+        )
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    rec = device_recommendation_service.recommend_vacuum_schedule(user)
+    if rec is None:
+        return {"available": False}
+    return {"available": True, **rec}
 
 
 @router.get("/{user_id}/daily-activity", response_model=DailyActivityResponse)

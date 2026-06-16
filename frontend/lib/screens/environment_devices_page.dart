@@ -12,6 +12,7 @@ import '../services/recommendation_refresh_service.dart';
 import '../services/session_service.dart';
 import '../services/tuya_lamp_api.dart';
 import '../services/user_api.dart';
+import '../utils/brightness_advisor.dart';
 import '../utils/environment_visuals.dart';
 
 /// Devices for one environment, grouped by `type` (Lamp, Thermostat, Plug, Sensor).
@@ -44,8 +45,12 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     EnvironmentDeviceType.thermostat,
     EnvironmentDeviceType.plug,
     EnvironmentDeviceType.sensor,
+    EnvironmentDeviceType.vacuum,
     EnvironmentDeviceType.other,
   ];
+
+  /// User-level robot vacuum recommendation (same for all vacuum devices).
+  VacuumRecommendation? _vacuumRec;
 
   @override
   void initState() {
@@ -53,6 +58,18 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     DeviceRefreshBus.instance.subscribe(_loadDevices);
     _loadDevices();
     _loadPeople();
+    _loadVacuumRecommendation();
+  }
+
+  Future<void> _loadVacuumRecommendation() async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null) return;
+    try {
+      final rec = await UserApi.getVacuumRecommendation(uid);
+      if (mounted) setState(() => _vacuumRec = rec);
+    } catch (_) {
+      /* öneri olmazsa kart sessizce gizlenir */
+    }
   }
 
   @override
@@ -175,6 +192,7 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     EnvironmentDevice device, {
     bool? status,
     double? currentValue,
+    String? room,
   }) async {
     final id = int.tryParse(device.id);
     if (id == null) return;
@@ -183,6 +201,7 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
         deviceId: id,
         status: status,
         currentValue: currentValue,
+        room: room,
       );
     } on UserApiException catch (e) {
       _showSnack('Device update failed: ${e.message}', error: true);
@@ -191,11 +210,26 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     }
   }
 
+  Future<void> _editDeviceRoom(EnvironmentDevice device) async {
+    final newRoom = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _EditRoomDialog(initialRoom: device.room),
+    );
+    if (newRoom == null || !mounted) return;
+    await _patchDevice(device, room: newRoom.trim());
+    if (mounted) {
+      _loadDevices();
+      _showSnack('Oda güncellendi');
+    }
+  }
+
   Future<void> _onDeviceToggle(EnvironmentDevice device, bool on) async {
     setState(() => _togglingDeviceIds.add(device.id));
     try {
       _setDeviceLocal(device, status: on);
       // Tuya lamp: forward command to the physical bulb if linked.
+      // Fiziksel lamba cevrimdisi/bagli degilse bile uygulama ici durumu
+      // guncelliyoruz; sadece kullaniciyi bilgilendiriyoruz.
       if (device.type == EnvironmentDeviceType.lamp) {
         try {
           if (on) {
@@ -204,13 +238,14 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
             await TuyaLampApi.turnOff();
           }
         } on UserApiException catch (e) {
-          _setDeviceLocal(device, status: !on);
-          _showSnack('Lamp command failed: ${e.message}', error: true);
-          return;
+          _showSnack(
+            'Fiziksel lambaya ulaşılamadı (${e.message}). '
+            'Uygulama içinde güncellendi.',
+          );
         } catch (e) {
-          _setDeviceLocal(device, status: !on);
-          _showSnack('Lamp command failed: $e', error: true);
-          return;
+          _showSnack(
+            'Fiziksel lambaya ulaşılamadı. Uygulama içinde güncellendi.',
+          );
         }
       }
       // Persist on/off so other clients / dashboard reflect the change.
@@ -228,10 +263,10 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     _setDeviceLocal(device, status: true, value: value);
     try {
       await TuyaLampApi.setBrightness(value.round());
-    } on UserApiException catch (e) {
-      _showSnack('Brightness failed: ${e.message}', error: true);
-    } catch (e) {
-      _showSnack('Brightness failed: $e', error: true);
+    } on UserApiException catch (_) {
+      // Fiziksel lamba yoksa/cevrimdisiysa uygulama ici parlakligi yine guncelle.
+    } catch (_) {
+      // ayni sekilde sessizce uygulama ici devam.
     }
     await _patchDevice(device, currentValue: value);
   }
@@ -934,6 +969,11 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                           : null,
                       onValueChanged: (value) =>
                           _onValueChange(device, value),
+                      onEditRoom: () => _editDeviceRoom(device),
+                      vacuumRecommendation:
+                          device.type == EnvironmentDeviceType.vacuum
+                              ? _vacuumRec
+                              : null,
                     ),
                   )),
               const SizedBox(height: 8),
@@ -955,6 +995,8 @@ class _DeviceCard extends StatefulWidget {
     required this.onStatusChanged,
     required this.onValueChanged,
     this.onBrightnessChanged,
+    this.onEditRoom,
+    this.vacuumRecommendation,
   });
 
   final EnvironmentDevice device;
@@ -965,6 +1007,8 @@ class _DeviceCard extends StatefulWidget {
   final ValueChanged<bool> onStatusChanged;
   final ValueChanged<double> onValueChanged;
   final ValueChanged<double>? onBrightnessChanged;
+  final VoidCallback? onEditRoom;
+  final VacuumRecommendation? vacuumRecommendation;
 
   @override
   State<_DeviceCard> createState() => _DeviceCardState();
@@ -1005,6 +1049,7 @@ class _DeviceCardState extends State<_DeviceCard> {
         'Program: ${_kWasherLabels[v.clamp(0, _kWasherLabels.length - 1).round()]}',
       DeviceControlKind.plug => 'Smart plug',
       DeviceControlKind.sensor => 'Sensor: ${v.toStringAsFixed(1)}',
+      DeviceControlKind.vacuum => 'Robot vacuum',
       DeviceControlKind.other => 'Device',
     };
   }
@@ -1018,6 +1063,7 @@ class _DeviceCardState extends State<_DeviceCard> {
         DeviceControlKind.washer => Icons.local_laundry_service_rounded,
         DeviceControlKind.plug => Icons.electrical_services_rounded,
         DeviceControlKind.sensor => Icons.sensors_rounded,
+        DeviceControlKind.vacuum => Icons.cleaning_services_rounded,
         DeviceControlKind.other => Icons.devices_other_rounded,
       };
 
@@ -1091,14 +1137,31 @@ class _DeviceCardState extends State<_DeviceCard> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        device.room.trim().isEmpty
-                            ? 'No room set'
-                            : device.room,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: device.room.trim().isEmpty
-                              ? AppColors.borderStrong
-                              : AppColors.textSecondary,
+                      InkWell(
+                        onTap: widget.onEditRoom,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              device.room.trim().isEmpty
+                                  ? 'Oda seç'
+                                  : device.room,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: device.room.trim().isEmpty
+                                    ? AppColors.borderStrong
+                                    : AppColors.textSecondary,
+                              ),
+                            ),
+                            if (widget.onEditRoom != null) ...[
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.edit_rounded,
+                                size: 13,
+                                color: AppColors.textMuted,
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ],
@@ -1214,6 +1277,9 @@ class _DeviceCardState extends State<_DeviceCard> {
                       size: 18, color: AppColors.textSecondary),
                 ],
               ),
+              _BrightnessRecommendationHint(
+                recommendation: brightnessRecommendationForRoom(device.room),
+              ),
             ],
             if (kind == DeviceControlKind.ac ||
                 kind == DeviceControlKind.thermostat)
@@ -1270,6 +1336,10 @@ class _DeviceCardState extends State<_DeviceCard> {
                   widget.onValueChanged(idx.toDouble());
                   _startCountdown(_kWasherDurations[idx]);
                 },
+              ),
+            if (kind == DeviceControlKind.vacuum)
+              _VacuumRecommendationHint(
+                recommendation: widget.vacuumRecommendation,
               ),
           ],
         ),
@@ -1515,6 +1585,7 @@ enum _DeviceChoice {
   oven,
   dishwasher,
   washingMachine,
+  vacuum,
   plug,
   sensor,
   other,
@@ -1529,6 +1600,7 @@ extension _DeviceChoiceX on _DeviceChoice {
         _DeviceChoice.oven => EnvironmentDeviceType.plug,
         _DeviceChoice.dishwasher => EnvironmentDeviceType.plug,
         _DeviceChoice.washingMachine => EnvironmentDeviceType.plug,
+        _DeviceChoice.vacuum => EnvironmentDeviceType.vacuum,
         _DeviceChoice.plug => EnvironmentDeviceType.plug,
         _DeviceChoice.sensor => EnvironmentDeviceType.sensor,
         _DeviceChoice.other => EnvironmentDeviceType.other,
@@ -1544,6 +1616,7 @@ extension _DeviceChoiceX on _DeviceChoice {
         _DeviceChoice.oven => 'Oven',
         _DeviceChoice.dishwasher => 'Dishwasher',
         _DeviceChoice.washingMachine => 'Washing Machine',
+        _DeviceChoice.vacuum => 'Robot Vacuum',
         _DeviceChoice.plug => 'Smart Plug',
         _DeviceChoice.sensor => 'Sensor',
         _DeviceChoice.other => 'Other',
@@ -1558,6 +1631,7 @@ extension _DeviceChoiceX on _DeviceChoice {
         _DeviceChoice.oven => 'Oven',
         _DeviceChoice.dishwasher => 'Dishwasher',
         _DeviceChoice.washingMachine => 'Washing Machine',
+        _DeviceChoice.vacuum => 'Robot Vacuum',
         _ => '',
       };
 
@@ -1569,6 +1643,7 @@ extension _DeviceChoiceX on _DeviceChoice {
         _DeviceChoice.oven => 180,
         _DeviceChoice.dishwasher => 1,
         _DeviceChoice.washingMachine => 1,
+        _DeviceChoice.vacuum => 0,
         _DeviceChoice.plug => 0,
         _DeviceChoice.sensor => 0,
         _DeviceChoice.other => 0,
@@ -1582,6 +1657,7 @@ extension _DeviceChoiceX on _DeviceChoice {
         _DeviceChoice.oven => Icons.local_fire_department_rounded,
         _DeviceChoice.dishwasher => Icons.dining_rounded,
         _DeviceChoice.washingMachine => Icons.local_laundry_service_rounded,
+        _DeviceChoice.vacuum => Icons.cleaning_services_rounded,
         _DeviceChoice.plug => Icons.electrical_services_rounded,
         _DeviceChoice.sensor => Icons.sensors_rounded,
         _DeviceChoice.other => Icons.devices_other_rounded,
@@ -1982,6 +2058,209 @@ class _TuyaLampBanner extends StatelessWidget {
         border: Border.all(color: border),
       ),
       child: child,
+    );
+  }
+}
+
+/// Oda adi duzenleme dialog'u. Controller'i kendi yasam dongusunde yonetir
+/// (dialog kapanma animasyonu sirasinda erken dispose hatasini onler).
+class _EditRoomDialog extends StatefulWidget {
+  const _EditRoomDialog({required this.initialRoom});
+
+  final String initialRoom;
+
+  @override
+  State<_EditRoomDialog> createState() => _EditRoomDialogState();
+}
+
+class _EditRoomDialogState extends State<_EditRoomDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialRoom);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Oda adı'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(
+          hintText: 'Örn: Çalışma Odası, Salon, Yatak Odası',
+        ),
+        onSubmitted: (v) => Navigator.pop(context, v),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Vazgeç'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('Kaydet'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Lamba kartinda, odaya gore onerilen parlakligi gosterir: %10..%100 arasi
+/// noktalar (onerilen nokta kirmizi ve buyuk) + altinda kirmizi aciklama.
+class _BrightnessRecommendationHint extends StatelessWidget {
+  const _BrightnessRecommendationHint({required this.recommendation});
+
+  final BrightnessRecommendation? recommendation;
+
+  static const Color _red = Color(0xFFFF5252);
+
+  @override
+  Widget build(BuildContext context) {
+    final rec = recommendation;
+    if (rec == null) return const SizedBox.shrink();
+
+    // Onerilen yuzdeyi en yakin %10'a yuvarlayarak nokta vurgusu yap.
+    final highlighted = (rec.percent / 10).round() * 10;
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 26, right: 26, top: 2, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (var p = 10; p <= 100; p += 10)
+                _dot(isRecommended: p == highlighted),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.tips_and_updates_rounded,
+                  size: 14, color: _red),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Sizin için önerilen parlaklık: %${rec.percent} '
+                  '(${rec.roomLabel})',
+                  style: const TextStyle(
+                    color: _red,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot({required bool isRecommended}) {
+    final size = isRecommended ? 12.0 : 7.0;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: isRecommended ? _red : AppColors.border,
+        shape: BoxShape.circle,
+        boxShadow: isRecommended
+            ? [
+                BoxShadow(
+                  color: _red.withValues(alpha: 0.4),
+                  blurRadius: 5,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+    );
+  }
+}
+
+/// Robot supurge kartinda, demografik akran grubuna gore onerilen kullanim
+/// saatini/sikligini kirmizi yaziyla gosterir.
+class _VacuumRecommendationHint extends StatelessWidget {
+  const _VacuumRecommendationHint({required this.recommendation});
+
+  final VacuumRecommendation? recommendation;
+
+  static const Color _red = Color(0xFFFF5252);
+
+  @override
+  Widget build(BuildContext context) {
+    final rec = recommendation;
+    if (rec == null || !rec.hasContent) return const SizedBox.shrink();
+
+    final lines = <String>[];
+    if (rec.recommendedTime != null && rec.recommendedTime!.isNotEmpty) {
+      lines.add('Önerilen süpürme zamanı: ${rec.recommendedTime}');
+    }
+    if (rec.recommendedFrequency != null &&
+        rec.recommendedFrequency!.isNotEmpty) {
+      lines.add('Önerilen sıklık: ${rec.recommendedFrequency}');
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: _red.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _red.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.tips_and_updates_rounded,
+                    size: 14, color: _red),
+                const SizedBox(width: 4),
+                Text(
+                  'Size özel öneri',
+                  style: const TextStyle(
+                    color: _red,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            for (final line in lines)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  line,
+                  style: const TextStyle(
+                    color: _red,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 3),
+            Text(
+              'Yaş, cinsiyet ve şehrinize benzer ${rec.peerCount} kişinin '
+              'tercihine göre.',
+              style: TextStyle(
+                color: _red.withValues(alpha: 0.8),
+                fontSize: 10,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

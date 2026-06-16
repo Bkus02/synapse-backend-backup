@@ -6,6 +6,7 @@ enum EnvironmentDeviceType {
   thermostat,
   plug,
   sensor,
+  vacuum,
   other,
 }
 
@@ -33,6 +34,7 @@ enum DeviceControlKind {
   washer,
   plug,
   sensor,
+  vacuum,
   other,
 }
 
@@ -42,6 +44,7 @@ extension EnvironmentDeviceTypeX on EnvironmentDeviceType {
         EnvironmentDeviceType.thermostat => 'Thermostat',
         EnvironmentDeviceType.plug => 'Plug',
         EnvironmentDeviceType.sensor => 'Sensor',
+        EnvironmentDeviceType.vacuum => 'Robot Vacuum',
         EnvironmentDeviceType.other => 'Other',
       };
 
@@ -51,6 +54,7 @@ extension EnvironmentDeviceTypeX on EnvironmentDeviceType {
         EnvironmentDeviceType.thermostat => 'Thermostat',
         EnvironmentDeviceType.plug => 'Plug',
         EnvironmentDeviceType.sensor => 'Sensor',
+        EnvironmentDeviceType.vacuum => 'Vacuum',
         EnvironmentDeviceType.other => 'Other',
       };
 
@@ -59,6 +63,7 @@ extension EnvironmentDeviceTypeX on EnvironmentDeviceType {
         EnvironmentDeviceType.thermostat => Icons.thermostat_rounded,
         EnvironmentDeviceType.plug => Icons.electrical_services_rounded,
         EnvironmentDeviceType.sensor => Icons.sensors_rounded,
+        EnvironmentDeviceType.vacuum => Icons.cleaning_services_rounded,
         EnvironmentDeviceType.other => Icons.devices_other_rounded,
       };
 
@@ -68,6 +73,7 @@ extension EnvironmentDeviceTypeX on EnvironmentDeviceType {
         EnvironmentDeviceType.thermostat => '${v.toStringAsFixed(1)} °C',
         EnvironmentDeviceType.plug => '${v.toStringAsFixed(0)} W',
         EnvironmentDeviceType.sensor => 'Reading: ${v.toStringAsFixed(1)}',
+        EnvironmentDeviceType.vacuum => 'Robot vacuum',
         EnvironmentDeviceType.other => 'Value: ${v.toStringAsFixed(1)}',
       };
 }
@@ -94,6 +100,8 @@ EnvironmentDeviceType environmentDeviceTypeFromApi(String raw) {
       return EnvironmentDeviceType.plug;
     case 'Sensor':
       return EnvironmentDeviceType.sensor;
+    case 'Vacuum':
+      return EnvironmentDeviceType.vacuum;
     case 'Other':
     default:
       return EnvironmentDeviceType.other;
@@ -151,12 +159,16 @@ class EnvironmentDevice {
     if (has(const ['klima', ' ac', 'air condition', 'condition'])) {
       return DeviceControlKind.ac;
     }
+    if (has(const ['supurge', 'süpürge', 'vacuum', 'robot'])) {
+      return DeviceControlKind.vacuum;
+    }
 
     return switch (type) {
       EnvironmentDeviceType.lamp => DeviceControlKind.lamp,
       EnvironmentDeviceType.thermostat => DeviceControlKind.thermostat,
       EnvironmentDeviceType.plug => DeviceControlKind.plug,
       EnvironmentDeviceType.sensor => DeviceControlKind.sensor,
+      EnvironmentDeviceType.vacuum => DeviceControlKind.vacuum,
       EnvironmentDeviceType.other => DeviceControlKind.other,
     };
   }

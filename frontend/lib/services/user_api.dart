@@ -28,6 +28,31 @@ class LoginResult {
   final int expiresIn;
 }
 
+/// Demografik peer-matching ile uretilen robot supurge kullanim onerisi.
+class VacuumRecommendation {
+  VacuumRecommendation({
+    required this.recommendedTime,
+    required this.recommendedFrequency,
+    required this.peerCount,
+  });
+
+  final String? recommendedTime;
+  final String? recommendedFrequency;
+  final int peerCount;
+
+  bool get hasContent =>
+      (recommendedTime != null && recommendedTime!.isNotEmpty) ||
+      (recommendedFrequency != null && recommendedFrequency!.isNotEmpty);
+
+  factory VacuumRecommendation.fromJson(Map<String, dynamic> json) {
+    return VacuumRecommendation(
+      recommendedTime: json['recommended_time'] as String?,
+      recommendedFrequency: json['recommended_frequency'] as String?,
+      peerCount: (json['peer_count'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class UserApi {
   UserApi._();
 
@@ -163,6 +188,26 @@ class UserApi {
       return DailyActivityLog.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>,
       );
+    }
+    throw UserApiException(_messageFromResponse(response));
+  }
+
+  /// Robot vacuum usage-time recommendation (demographic peer matching).
+  /// Returns null when the backend has no recommendation (incomplete profile).
+  static Future<VacuumRecommendation?> getVacuumRecommendation(
+    String userId,
+  ) async {
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/users/$userId/vacuum-recommendation',
+    );
+    final response = await http.get(
+      uri,
+      headers: SessionService.instance.authHeaders(),
+    );
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      if (json['available'] != true) return null;
+      return VacuumRecommendation.fromJson(json);
     }
     throw UserApiException(_messageFromResponse(response));
   }
