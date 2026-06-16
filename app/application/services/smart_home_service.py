@@ -505,6 +505,12 @@ def delete_device(device_id: int, session: Session) -> dict[str, str]:
     device = session.get(Device, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail="Device bulunamadi.")
+    # Legacy DB'lerde behavior_logs FK CASCADE olmayabilir; once loglari sil.
+    logs = list(
+        session.exec(select(BehaviorLog).where(BehaviorLog.device_id == device_id))
+    )
+    for log in logs:
+        session.delete(log)
     session.delete(device)
     _commit_or_400(session, "Device silinemedi.")
     return {"message": "Device silindi."}

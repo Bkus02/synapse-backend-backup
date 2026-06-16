@@ -14,7 +14,7 @@ from app.application.services.recommendation_catalog import (
     describe_profile,
     pick_advices,
 )
-from app.core.models import User
+from app.core.models import Environment, User
 from app.db.database import get_session
 from app.infrastructure.weather import get_current_weather, normalize_city
 
@@ -100,6 +100,48 @@ def get_personalized_advices(
         "weather": weather,
         "advices": advices,
     }
+
+
+@router.get("/{user_id}/climate-recommendations")
+def get_climate_recommendations(
+    user_id: str,
+    environment_id: str | None = Query(
+        None,
+        description="Environment id; location is read from DB (preferred over city).",
+    ),
+    city: str | None = Query(
+        None,
+        description="Environment city override when environment_id is omitted.",
+    ),
+    token_user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    """AC/thermostat temperature hints by environment city + room type."""
+    if user_id != token_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own recommendations.",
+        )
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    resolved_city = city
+    if environment_id:
+        smart_home_service.require_environment_access(
+            user_id, environment_id, session
+        )
+        env = session.get(Environment, environment_id)
+        if env is None:
+            raise HTTPException(status_code=404, detail="Environment not found")
+        resolved_city = env.location
+
+    rec = device_recommendation_service.recommend_climate_settings(
+        user, city=resolved_city
+    )
+    if rec is None:
+        return {"available": False}
+    return {"available": True, **rec}
 
 
 @router.get("/{user_id}/vacuum-recommendation")

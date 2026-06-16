@@ -13,6 +13,7 @@ import '../services/session_service.dart';
 import '../services/tuya_lamp_api.dart';
 import '../services/user_api.dart';
 import '../utils/brightness_advisor.dart';
+import '../utils/temperature_advisor.dart';
 import '../utils/environment_visuals.dart';
 
 /// Devices for one environment, grouped by `type` (Lamp, Thermostat, Plug, Sensor).
@@ -52,6 +53,9 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
   /// User-level robot vacuum recommendation (same for all vacuum devices).
   VacuumRecommendation? _vacuumRec;
 
+  /// City + room AC temperatures (peer-blended when profile is complete).
+  ClimateRecommendationBundle? _climateRec;
+
   @override
   void initState() {
     super.initState();
@@ -59,6 +63,21 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     _loadDevices();
     _loadPeople();
     _loadVacuumRecommendation();
+    _loadClimateRecommendations();
+  }
+
+  Future<void> _loadClimateRecommendations() async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null) return;
+    try {
+      final rec = await UserApi.getClimateRecommendations(
+        uid,
+        environmentId: widget.environment.id,
+      );
+      if (mounted) setState(() => _climateRec = rec);
+    } catch (_) {
+      /* local fallback in temperature_advisor */
+    }
   }
 
   Future<void> _loadVacuumRecommendation() async {
@@ -144,6 +163,7 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     try {
       await DeviceApi.delete(deviceId: id, userId: uid);
       if (mounted) {
+        setState(() => _devices.removeWhere((e) => e.id == device.id));
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Device removed'),
@@ -154,13 +174,11 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
       }
     } on UserApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _showSnack(e.message, error: true);
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('Device could not be removed: $e', error: true);
       }
     }
   }
@@ -219,7 +237,7 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     await _patchDevice(device, room: newRoom.trim());
     if (mounted) {
       _loadDevices();
-      _showSnack('Oda güncellendi');
+      _showSnack('Room updated');
     }
   }
 
@@ -974,6 +992,11 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                           device.type == EnvironmentDeviceType.vacuum
                               ? _vacuumRec
                               : null,
+                      climateCelsiusByRoom: _climateRec?.celsiusByRoom,
+                      climatePeerMedian: _climateRec?.peerMedianCelsius,
+                      climatePeerCount: _climateRec?.peerCount ?? 0,
+                      climateCity: _climateRec?.city,
+                      environmentLocation: widget.environment.location,
                     ),
                   )),
               const SizedBox(height: 8),
@@ -997,6 +1020,11 @@ class _DeviceCard extends StatefulWidget {
     this.onBrightnessChanged,
     this.onEditRoom,
     this.vacuumRecommendation,
+    this.climateCelsiusByRoom,
+    this.climatePeerMedian,
+    this.climatePeerCount = 0,
+    this.climateCity,
+    this.environmentLocation,
   });
 
   final EnvironmentDevice device;
@@ -1009,6 +1037,11 @@ class _DeviceCard extends StatefulWidget {
   final ValueChanged<double>? onBrightnessChanged;
   final VoidCallback? onEditRoom;
   final VacuumRecommendation? vacuumRecommendation;
+  final Map<String, int>? climateCelsiusByRoom;
+  final int? climatePeerMedian;
+  final int climatePeerCount;
+  final String? climateCity;
+  final String? environmentLocation;
 
   @override
   State<_DeviceCard> createState() => _DeviceCardState();
@@ -1145,7 +1178,7 @@ class _DeviceCardState extends State<_DeviceCard> {
                           children: [
                             Text(
                               device.room.trim().isEmpty
-                                  ? 'Oda seç'
+                                  ? 'Select room'
                                   : device.room,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: device.room.trim().isEmpty
@@ -1282,7 +1315,7 @@ class _DeviceCardState extends State<_DeviceCard> {
               ),
             ],
             if (kind == DeviceControlKind.ac ||
-                kind == DeviceControlKind.thermostat)
+                kind == DeviceControlKind.thermostat) ...[
               _TempSliderRow(
                 value: _effectiveValue.clamp(16, 30).toDouble(),
                 min: 16,
@@ -1292,6 +1325,17 @@ class _DeviceCardState extends State<_DeviceCard> {
                 enabled: device.status,
                 onChanged: widget.onValueChanged,
               ),
+              _TemperatureRecommendationHint(
+                recommendation: temperatureRecommendationForRoom(
+                  room: device.room,
+                  userLocation: widget.environmentLocation,
+                  apiCelsiusByRoom: widget.climateCelsiusByRoom,
+                  peerMedianCelsius: widget.climatePeerMedian,
+                  peerCount: widget.climatePeerCount,
+                  apiCity: widget.climateCity,
+                ),
+              ),
+            ],
             if (kind == DeviceControlKind.oven) ...[
               _TempSliderRow(
                 value: _effectiveValue.clamp(50, 250).toDouble(),
@@ -1683,7 +1727,7 @@ class _AddDeviceSheet extends StatefulWidget {
 
 class _AddDeviceSheetState extends State<_AddDeviceSheet> {
   final _name = TextEditingController();
-  final _room = TextEditingController();
+  String? _selectedRoom;
   _DeviceChoice _choice = _DeviceChoice.lampPlain;
   bool _saving = false;
 
@@ -1697,7 +1741,6 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
   @override
   void dispose() {
     _name.dispose();
-    _room.dispose();
     super.dispose();
   }
 
@@ -1761,7 +1804,7 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
         environmentId: widget.environmentId,
         type: _type,
         name: _name.text,
-        room: _room.text.trim().isEmpty ? null : _room.text,
+        room: _selectedRoom,
         status: initialOn,
         currentValue: initialBrightness,
       );
@@ -1832,21 +1875,19 @@ class _AddDeviceSheetState extends State<_AddDeviceSheet> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _room,
-            style: const TextStyle(color: AppColors.textPrimary),
-            decoration: InputDecoration(
-              labelText: 'Room (optional)',
-              labelStyle: const TextStyle(color: AppColors.textSecondary),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: widget.accent),
-              ),
+          Text(
+            'Room (optional)',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          const SizedBox(height: 8),
+          _RoomCatalogPicker(
+            accent: widget.accent,
+            selectedLabel: _selectedRoom,
+            onSelected: (label) => setState(() => _selectedRoom = label),
           ),
           const SizedBox(height: 16),
           InputDecorator(
@@ -2062,8 +2103,85 @@ class _TuyaLampBanner extends StatelessWidget {
   }
 }
 
-/// Oda adi duzenleme dialog'u. Controller'i kendi yasam dongusunde yonetir
-/// (dialog kapanma animasyonu sirasinda erken dispose hatasini onler).
+/// Sabit oda katalogu — Study / Standard / Rest Room secenekleri.
+class _RoomCatalogPicker extends StatelessWidget {
+  const _RoomCatalogPicker({
+    required this.accent,
+    required this.selectedLabel,
+    required this.onSelected,
+  });
+
+  final Color accent;
+  final String? selectedLabel;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (final opt in kRoomCatalogOptions)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Material(
+              color: selectedLabel == opt.label
+                  ? accent.withValues(alpha: 0.12)
+                  : AppColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                onTap: () => onSelected(opt.label),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selectedLabel == opt.label
+                          ? accent
+                          : AppColors.border,
+                      width: selectedLabel == opt.label ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              opt.label,
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              opt.subtitle,
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selectedLabel == opt.label)
+                        Icon(Icons.check_circle_rounded,
+                            color: accent, size: 22),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Oda secimi dialog'u — serbest metin yerine katalog.
 class _EditRoomDialog extends StatefulWidget {
   const _EditRoomDialog({required this.initialRoom});
 
@@ -2074,36 +2192,37 @@ class _EditRoomDialog extends StatefulWidget {
 }
 
 class _EditRoomDialogState extends State<_EditRoomDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialRoom);
+  late String? _selected;
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _selected = roomCatalogOptionForLabel(widget.initialRoom)?.label;
   }
 
   @override
   Widget build(BuildContext context) {
+    final accent = AppColors.accent;
     return AlertDialog(
-      title: const Text('Oda adı'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        textCapitalization: TextCapitalization.words,
-        decoration: const InputDecoration(
-          hintText: 'Örn: Çalışma Odası, Salon, Yatak Odası',
+      title: const Text('Select room'),
+      content: SizedBox(
+        width: 320,
+        child: _RoomCatalogPicker(
+          accent: accent,
+          selectedLabel: _selected,
+          onSelected: (label) => setState(() => _selected = label),
         ),
-        onSubmitted: (v) => Navigator.pop(context, v),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Vazgeç'),
+          child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text),
-          child: const Text('Kaydet'),
+          onPressed: _selected == null
+              ? null
+              : () => Navigator.pop(context, _selected),
+          child: const Text('Save'),
         ),
       ],
     );
@@ -2147,7 +2266,7 @@ class _BrightnessRecommendationHint extends StatelessWidget {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  'Sizin için önerilen parlaklık: %${rec.percent} '
+                  'Recommended brightness: ${rec.percent}% '
                   '(${rec.roomLabel})',
                   style: const TextStyle(
                     color: _red,
@@ -2185,8 +2304,89 @@ class _BrightnessRecommendationHint extends StatelessWidget {
   }
 }
 
-/// Robot supurge kartinda, demografik akran grubuna gore onerilen kullanim
-/// saatini/sikligini kirmizi yaziyla gosterir.
+/// AC / thermostat card: city + room based temperature hint (red marker).
+class _TemperatureRecommendationHint extends StatelessWidget {
+  const _TemperatureRecommendationHint({required this.recommendation});
+
+  final TemperatureRecommendation recommendation;
+
+  static const Color _red = Color(0xFFFF5252);
+
+  @override
+  Widget build(BuildContext context) {
+    final rec = recommendation;
+    final highlighted = (rec.celsius / 2).round() * 2;
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 26, right: 26, top: 2, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (var t = 16; t <= 30; t += 2)
+                _tempDot(isRecommended: t == highlighted),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.tips_and_updates_rounded,
+                  size: 14, color: _red),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Recommended temperature: ${rec.celsius}°C '
+                  '(${rec.roomLabel}, ${rec.city})',
+                  style: const TextStyle(
+                    color: _red,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (rec.peerMedianCelsius != null && rec.peerCount > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Survey peers (${rec.peerCount} similar users) average '
+              '${rec.peerMedianCelsius}°C for summer AC.',
+              style: TextStyle(
+                color: _red.withValues(alpha: 0.85),
+                fontSize: 10,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _tempDot({required bool isRecommended}) {
+    final size = isRecommended ? 12.0 : 7.0;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: isRecommended ? _red : AppColors.border,
+        shape: BoxShape.circle,
+        boxShadow: isRecommended
+            ? [
+                BoxShadow(
+                  color: _red.withValues(alpha: 0.4),
+                  blurRadius: 5,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+    );
+  }
+}
+
+/// Robot vacuum card: demographic peer usage-time hint (red box).
 class _VacuumRecommendationHint extends StatelessWidget {
   const _VacuumRecommendationHint({required this.recommendation});
 
@@ -2201,11 +2401,11 @@ class _VacuumRecommendationHint extends StatelessWidget {
 
     final lines = <String>[];
     if (rec.recommendedTime != null && rec.recommendedTime!.isNotEmpty) {
-      lines.add('Önerilen süpürme zamanı: ${rec.recommendedTime}');
+      lines.add('Recommended vacuum time: ${rec.recommendedTime}');
     }
     if (rec.recommendedFrequency != null &&
         rec.recommendedFrequency!.isNotEmpty) {
-      lines.add('Önerilen sıklık: ${rec.recommendedFrequency}');
+      lines.add('Recommended frequency: ${rec.recommendedFrequency}');
     }
 
     return Padding(
@@ -2227,7 +2427,7 @@ class _VacuumRecommendationHint extends StatelessWidget {
                     size: 14, color: _red),
                 const SizedBox(width: 4),
                 Text(
-                  'Size özel öneri',
+                  'Recommended for you',
                   style: const TextStyle(
                     color: _red,
                     fontSize: 12,
@@ -2251,8 +2451,7 @@ class _VacuumRecommendationHint extends StatelessWidget {
               ),
             const SizedBox(height: 3),
             Text(
-              'Yaş, cinsiyet ve şehrinize benzer ${rec.peerCount} kişinin '
-              'tercihine göre.',
+              'Based on ${rec.peerCount} similar users (age, gender, city).',
               style: TextStyle(
                 color: _red.withValues(alpha: 0.8),
                 fontSize: 10,

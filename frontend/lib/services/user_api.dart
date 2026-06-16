@@ -28,6 +28,37 @@ class LoginResult {
   final int expiresIn;
 }
 
+/// City + room AC temperature recommendations (optional peer blend from API).
+class ClimateRecommendationBundle {
+  ClimateRecommendationBundle({
+    required this.city,
+    required this.celsiusByRoom,
+    required this.peerCount,
+    this.peerMedianCelsius,
+  });
+
+  final String city;
+  final Map<String, int> celsiusByRoom;
+  final int peerCount;
+  final int? peerMedianCelsius;
+
+  factory ClimateRecommendationBundle.fromJson(Map<String, dynamic> json) {
+    final raw = json['recommendations'] as Map<String, dynamic>? ?? {};
+    final mapped = <String, int>{};
+    for (final entry in raw.entries) {
+      final room = entry.value as Map<String, dynamic>;
+      mapped[entry.key] = (room['celsius'] as num).round();
+    }
+    final peerMedian = json['peer_median_celsius'];
+    return ClimateRecommendationBundle(
+      city: (json['city'] as String?) ?? 'Istanbul',
+      celsiusByRoom: mapped,
+      peerCount: (json['peer_count'] as num?)?.toInt() ?? 0,
+      peerMedianCelsius: peerMedian == null ? null : (peerMedian as num).round(),
+    );
+  }
+}
+
 /// Demografik peer-matching ile uretilen robot supurge kullanim onerisi.
 class VacuumRecommendation {
   VacuumRecommendation({
@@ -188,6 +219,34 @@ class UserApi {
       return DailyActivityLog.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>,
       );
+    }
+    throw UserApiException(_messageFromResponse(response));
+  }
+
+  /// AC/thermostat temperatures by room type for an environment.
+  /// Prefer [environmentId] so the backend reads location from the DB.
+  static Future<ClimateRecommendationBundle?> getClimateRecommendations(
+    String userId, {
+    String? environmentId,
+    String? city,
+  }) async {
+    final query = <String, String>{};
+    if (environmentId != null && environmentId.trim().isNotEmpty) {
+      query['environment_id'] = environmentId.trim();
+    } else if (city != null && city.trim().isNotEmpty) {
+      query['city'] = city.trim();
+    }
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/users/$userId/climate-recommendations',
+    ).replace(queryParameters: query.isEmpty ? null : query);
+    final response = await http.get(
+      uri,
+      headers: SessionService.instance.authHeaders(),
+    );
+    if (response.statusCode == 200) {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      if (json['available'] != true) return null;
+      return ClimateRecommendationBundle.fromJson(json);
     }
     throw UserApiException(_messageFromResponse(response));
   }

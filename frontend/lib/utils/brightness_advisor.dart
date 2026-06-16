@@ -1,9 +1,7 @@
 /// Oda bazli lamba parlakligi onerisi.
 ///
-/// Standart aydinlatma kilavuzlarina gore her oda tipinin onerilen parlaklik
-/// yuzdesi farklidir (calisma odasi yuksek, yatak odasi dusuk vb.). Cihazin
-/// `room` alanindaki serbest metni anahtar kelimelerle eslestirip uygun
-/// yuzdeyi doneriz. Eslesme yoksa `null` doner (oneri gosterilmez).
+/// Oda secimi sabit bir katalogdan yapilir (Study Room, Standard Room, Rest Room)
+/// boylece yazim hatasi veya eslesme sorunu olmaz.
 class BrightnessRecommendation {
   const BrightnessRecommendation({
     required this.percent,
@@ -13,92 +11,87 @@ class BrightnessRecommendation {
   /// Onerilen parlaklik yuzdesi (0-100).
   final int percent;
 
-  /// Kullaniciya gosterilecek oda etiketi (orn. "calisma odasi").
+  /// Kullaniciya gosterilecek oda etiketi.
   final String roomLabel;
 }
 
-class _RoomRule {
-  const _RoomRule(this.keywords, this.percent, this.label);
-  final List<String> keywords;
-  final int percent;
+/// Sabit oda katalogu — DB'ye bu Ingilizce etiketler kaydedilir.
+class RoomCatalogOption {
+  const RoomCatalogOption({
+    required this.label,
+    required this.brightnessPercent,
+    required this.subtitle,
+  });
+
   final String label;
+  final int brightnessPercent;
+  final String subtitle;
 }
 
-// Siralama onemli: daha ozel odalar (calisma, yemek) genel odalardan (oda)
-// once gelmeli.
-const List<_RoomRule> _rules = [
-  _RoomRule(
-    ['calisma', 'çalışma', 'study', 'office', 'ofis', 'work', 'desk', 'ders'],
-    80,
-    'çalışma odası',
+const List<RoomCatalogOption> kRoomCatalogOptions = [
+  RoomCatalogOption(
+    label: 'Study Room',
+    brightnessPercent: 80,
+    subtitle: 'Focused work — recommended 80%',
   ),
-  _RoomRule(
-    ['mutfak', 'kitchen'],
-    75,
-    'mutfak',
+  RoomCatalogOption(
+    label: 'Standard Room',
+    brightnessPercent: 60,
+    subtitle: 'Living / general — recommended 60%',
   ),
-  _RoomRule(
-    ['banyo', 'bathroom', 'tuvalet', 'wc', 'lavabo'],
-    70,
-    'banyo',
-  ),
-  _RoomRule(
-    ['yemek', 'dining'],
-    70,
-    'yemek odası',
-  ),
-  _RoomRule(
-    ['cocuk', 'çocuk', 'kids', 'nursery', 'bebek', 'oyun'],
-    60,
-    'çocuk odası',
-  ),
-  _RoomRule(
-    ['salon', 'oturma', 'living', 'lounge', 'misafir'],
-    60,
-    'salon',
-  ),
-  _RoomRule(
-    ['koridor', 'hol', 'antre', 'hallway', 'corridor', 'giris', 'giriş'],
-    45,
-    'koridor',
-  ),
-  _RoomRule(
-    [
-      'yatak',
-      'uyku',
-      'dinlenme',
-      'bedroom',
-      'rest',
-      'sleep',
-      'yatma',
-    ],
-    30,
-    'yatak / dinlenme odası',
+  RoomCatalogOption(
+    label: 'Rest Room',
+    brightnessPercent: 30,
+    subtitle: 'Bedroom / rest — recommended 30%',
   ),
 ];
 
-/// Taninmayan veya bos oda icin varsayilan genel ic mekan aydinlatmasi.
+/// Eski Turkce veya serbest metin oda adlarini kataloga esler.
+RoomCatalogOption? roomCatalogOptionForLabel(String? room) {
+  final normalized = (room ?? '').trim();
+  if (normalized.isEmpty) return null;
+
+  for (final opt in kRoomCatalogOptions) {
+    if (opt.label == normalized) return opt;
+  }
+
+  final lower = normalized.toLowerCase();
+  if (lower.contains('study') ||
+      lower.contains('çalış') ||
+      lower.contains('calis') ||
+      lower.contains('office') ||
+      lower.contains('ofis')) {
+    return kRoomCatalogOptions[0];
+  }
+  if (lower.contains('rest') ||
+      lower.contains('dinlen') ||
+      lower.contains('yatak') ||
+      lower.contains('bedroom') ||
+      lower.contains('sleep')) {
+    return kRoomCatalogOptions[2];
+  }
+  if (lower.contains('standard') ||
+      lower.contains('normal') ||
+      lower.contains('salon') ||
+      lower.contains('living')) {
+    return kRoomCatalogOptions[1];
+  }
+  return null;
+}
+
 const BrightnessRecommendation _generalDefault = BrightnessRecommendation(
   percent: 60,
-  roomLabel: 'genel ortam',
+  roomLabel: 'Standard Room',
 );
 
-/// Verilen oda adina gore parlaklik onerisi.
-///
-/// Oda tanidik bir tipe (calisma/salon/yatak vb.) eslesirse ona ozel deger,
-/// aksi halde genel ic mekan varsayilani (%60) doner. Boylece her lambada
-/// kullaniciya bir oneri gosterilir.
+/// Verilen oda etiketine gore parlaklik onerisi.
 BrightnessRecommendation brightnessRecommendationForRoom(String? room) {
-  final normalized = (room ?? '').trim().toLowerCase();
-  if (normalized.isNotEmpty) {
-    for (final rule in _rules) {
-      if (rule.keywords.any(normalized.contains)) {
-        return BrightnessRecommendation(
-          percent: rule.percent,
-          roomLabel: rule.label,
-        );
-      }
-    }
+  final opt = roomCatalogOptionForLabel(room);
+  if (opt != null) {
+    return BrightnessRecommendation(
+      percent: opt.brightnessPercent,
+      roomLabel: opt.label,
+    );
   }
   return _generalDefault;
 }

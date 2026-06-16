@@ -50,22 +50,30 @@ class WeatherSnapshot:
 _cache: dict[str, tuple[float, WeatherSnapshot]] = {}
 
 
+def _ascii_fold_tr(text: str) -> str:
+    """Turkish letters to ASCII before casefold (İZMİR casefold alone breaks izmir match)."""
+    return (
+        text.replace("İ", "i")
+        .replace("I", "i")
+        .replace("ı", "i")
+        .replace("Ş", "s")
+        .replace("ş", "s")
+        .replace("Ç", "c")
+        .replace("ç", "c")
+        .replace("Ö", "o")
+        .replace("ö", "o")
+        .replace("Ü", "u")
+        .replace("ü", "u")
+        .replace("Ğ", "g")
+        .replace("ğ", "g")
+    )
+
+
 def normalize_city(value: str | None) -> str:
     """Map a free-form location to one of SUPPORTED_CITIES (fallback: Istanbul)."""
     if not value:
         return _DEFAULT_CITY
-    key = value.strip().casefold()
-    # Strip diacritics for common Turkish spellings.
-    key = (
-        key.replace("ı", "i")
-        .replace("İ", "i")
-        .replace("ş", "s")
-        .replace("Ş", "s")
-        .replace("ç", "c")
-        .replace("ö", "o")
-        .replace("ü", "u")
-        .replace("ğ", "g")
-    )
+    key = _ascii_fold_tr(value.strip()).casefold()
     for canonical in SUPPORTED_CITIES:
         if canonical in key:
             return canonical
