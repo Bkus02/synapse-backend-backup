@@ -8,9 +8,7 @@ import 'services/user_api.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
-<<<<<<< Updated upstream
 import 'theme/app_theme.dart';
-=======
 import 'widgets/auth_gate.dart';
 
 Future<String> _resolveInitialRoute() async {
@@ -28,7 +26,6 @@ Future<String> _resolveInitialRoute() async {
   }
   return '/welcome';
 }
->>>>>>> Stashed changes
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,20 +46,8 @@ class SynapseApp extends StatelessWidget {
     return MaterialApp(
       title: 'Synapse',
       debugShowCheckedModeBanner: false,
-<<<<<<< Updated upstream
       theme: AppTheme.light,
-      initialRoute: '/welcome',
-=======
-      theme: baseTheme.copyWith(
-        scaffoldBackgroundColor: const Color(0xFF050814),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-      ),
       initialRoute: initialRoute,
->>>>>>> Stashed changes
       routes: {
         '/welcome': (_) => const WelcomePage(),
         '/login': (context) {

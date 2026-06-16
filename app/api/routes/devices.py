@@ -2,11 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlmodel import Session
 
 from app.api.deps import current_user_id
-<<<<<<< Updated upstream
 from app.api.schemas import DeviceCreate, DeviceUpdate
-=======
-from app.api.schemas import DeviceCreate, DevicePatch
->>>>>>> Stashed changes
 from app.application.services import smart_home_service
 from app.core.models import Device
 from app.db.database import get_session
@@ -42,40 +38,53 @@ def create_device(
 @router.patch("/{device_id}", response_model=Device)
 def patch_device(
     device_id: int,
-<<<<<<< Updated upstream
     payload: DeviceUpdate,
-    user_id: str = Depends(current_user_id),
-    session: Session = Depends(get_session),
-) -> Device:
-    return smart_home_service.patch_device(device_id, user_id, payload, session)
-=======
-    payload: DevicePatch,
     background_tasks: BackgroundTasks,
     user_id: str = Depends(current_user_id),
     session: Session = Depends(get_session),
 ) -> Device:
     """
-    Sprint D: cihazı aç/kapa simülasyonu.
+    Cihaz güncelleme (birleşik):
+    - `name` / `room`: alan güncellemesi (cihaz yeniden adlandırma vb.).
+    - `status`: Sprint D aç/kapa simülasyonu; `behavior_logs` kaydı oluşturur ve
+      inference arka planda çalışır.
+    """
+    data = payload.model_dump(exclude_unset=True)
 
-    `status` güncellenir, `behavior_logs` kaydı oluşturulur ve inference arka planda çalışır.
-  """
-    if payload.status is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="status alani zorunlu (simulasyon icin).",
+    # 1) Rename / alan güncellemeleri (status disinda).
+    field_updates = {k: v for k, v in data.items() if k in {"name", "room"}}
+    if field_updates:
+        smart_home_service.patch_device(
+            device_id, user_id, DeviceUpdate(**field_updates), session
         )
-    device, log = smart_home_service.set_device_status_authenticated(
-        device_id,
-        user_id,
-        payload.status,
-        session,
-        current_value=payload.current_value,
-    )
-    background_tasks.add_task(
-        smart_home_service.run_inference_for_behavior_log_background, log.id
-    )
+
+    # 2) Status verildiyse ac/kapa simulasyonu + behavior log + inference.
+    if data.get("status") is not None:
+        device, log = smart_home_service.set_device_status_authenticated(
+            device_id,
+            user_id,
+            data["status"],
+            session,
+            current_value=data.get("current_value"),
+        )
+        background_tasks.add_task(
+            smart_home_service.run_inference_for_behavior_log_background, log.id
+        )
+        return device
+
+    # 3) Status yok ama current_value verildiyse generic guncelleme.
+    if "current_value" in data:
+        smart_home_service.patch_device(
+            device_id,
+            user_id,
+            DeviceUpdate(current_value=data["current_value"]),
+            session,
+        )
+
+    device = session.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device bulunamadi.")
     return device
->>>>>>> Stashed changes
 
 
 @router.delete("/{device_id}")

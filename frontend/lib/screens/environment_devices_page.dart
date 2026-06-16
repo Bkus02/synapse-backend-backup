@@ -61,45 +61,6 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
     super.dispose();
   }
 
-  Future<void> _toggleDeviceStatus(EnvironmentDevice device, bool on) async {
-    final uid = SessionService.instance.user?['id'] as String?;
-    if (uid == null) return;
-    final deviceId = int.tryParse(device.id);
-    if (deviceId == null) return;
-
-    setState(() => _togglingDeviceIds.add(device.id));
-    try {
-      await DeviceApi.setStatus(deviceId: deviceId, status: on);
-      await _loadDevices();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${device.name} ${on ? "turned on" : "turned off"} — Synapse is learning.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        RecommendationRefreshService.instance.requestImmediateRefresh();
-      }
-    } on UserApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      await _loadDevices();
-    } finally {
-      if (mounted) {
-        setState(() => _togglingDeviceIds.remove(device.id));
-      }
-    }
-  }
-
   Future<void> _loadDevices() async {
     final uid = SessionService.instance.user?['id'] as String?;
     if (uid == null) {
@@ -231,27 +192,36 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
   }
 
   Future<void> _onDeviceToggle(EnvironmentDevice device, bool on) async {
-    _setDeviceLocal(device, status: on);
-    // Tuya lamp: forward command to the physical bulb if linked.
-    if (device.type == EnvironmentDeviceType.lamp) {
-      try {
-        if (on) {
-          await TuyaLampApi.turnOn();
-        } else {
-          await TuyaLampApi.turnOff();
+    setState(() => _togglingDeviceIds.add(device.id));
+    try {
+      _setDeviceLocal(device, status: on);
+      // Tuya lamp: forward command to the physical bulb if linked.
+      if (device.type == EnvironmentDeviceType.lamp) {
+        try {
+          if (on) {
+            await TuyaLampApi.turnOn();
+          } else {
+            await TuyaLampApi.turnOff();
+          }
+        } on UserApiException catch (e) {
+          _setDeviceLocal(device, status: !on);
+          _showSnack('Lamp command failed: ${e.message}', error: true);
+          return;
+        } catch (e) {
+          _setDeviceLocal(device, status: !on);
+          _showSnack('Lamp command failed: $e', error: true);
+          return;
         }
-      } on UserApiException catch (e) {
-        _setDeviceLocal(device, status: !on);
-        _showSnack('Lamp command failed: ${e.message}', error: true);
-        return;
-      } catch (e) {
-        _setDeviceLocal(device, status: !on);
-        _showSnack('Lamp command failed: $e', error: true);
-        return;
+      }
+      // Persist on/off so other clients / dashboard reflect the change.
+      // Backend ayrica behavior log + inference tetikler (Sprint D).
+      await _patchDevice(device, status: on);
+      RecommendationRefreshService.instance.requestImmediateRefresh();
+    } finally {
+      if (mounted) {
+        setState(() => _togglingDeviceIds.remove(device.id));
       }
     }
-    // Persist on/off so other clients / dashboard reflect the change.
-    await _patchDevice(device, status: on);
   }
 
   Future<void> _onLampBrightness(EnvironmentDevice device, double value) async {
@@ -912,9 +882,9 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _DeviceCard(
                       device: device,
-<<<<<<< Updated upstream
                       accent: AppColors.accent,
                       cardColor: AppColors.surface,
+                      toggling: _togglingDeviceIds.contains(device.id),
                       onRemove: () => _confirmRemoveDevice(device),
                       onStatusChanged: (on) => _onDeviceToggle(device, on),
                       onBrightnessChanged: device.type ==
@@ -923,13 +893,6 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                           : null,
                       onValueChanged: (value) =>
                           _onValueChange(device, value),
-=======
-                      accent: _accent,
-                      cardColor: _card,
-                      toggling: _togglingDeviceIds.contains(device.id),
-                      onRemove: () => _confirmRemoveDevice(device),
-                      onStatusChanged: (on) => _toggleDeviceStatus(device, on),
->>>>>>> Stashed changes
                     ),
                   )),
               const SizedBox(height: 8),
@@ -1160,22 +1123,16 @@ class _DeviceCardState extends State<_DeviceCard> {
                   child: Center(
                     child: Switch.adaptive(
                       value: device.status,
-<<<<<<< Updated upstream
                       activeThumbColor: AppColors.textOnAccent,
                       activeTrackColor: widget.accent.withValues(alpha: 0.55),
                       inactiveThumbColor: AppColors.textSecondary,
                       inactiveTrackColor: AppColors.border,
-                      onChanged: (on) {
-                        widget.onStatusChanged(on);
-                        if (!on) _stopCountdown();
-                      },
-=======
-                      activeThumbColor: Colors.white,
-                      activeTrackColor: accent.withValues(alpha: 0.55),
-                      inactiveThumbColor: Colors.white54,
-                      inactiveTrackColor: Colors.white24,
-                      onChanged: toggling ? null : onStatusChanged,
->>>>>>> Stashed changes
+                      onChanged: widget.toggling
+                          ? null
+                          : (on) {
+                              widget.onStatusChanged(on);
+                              if (!on) _stopCountdown();
+                            },
                     ),
                   ),
                 ),

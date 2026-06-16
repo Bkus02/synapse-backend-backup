@@ -1,6 +1,3 @@
-import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -9,8 +6,6 @@ import '../models/daily_activity.dart';
 import '../models/environment_summary.dart';
 import '../models/habit.dart';
 import '../models/recommendation.dart' as api;
-import '../services/behavior_log_api.dart';
-import '../services/device_api.dart';
 import '../services/device_refresh_bus.dart';
 import '../services/environment_api.dart';
 import '../services/environment_streak_api.dart';
@@ -95,13 +90,11 @@ class _DashboardPageState extends State<DashboardPage> {
     var count = 0;
     try {
       count += await JoinRequestInbox.pendingCountForAdmin();
-<<<<<<< Updated upstream
       if (SessionService.instance.hasToken) {
         count += await NotificationApi.badge();
-=======
+      }
       if (RecommendationRefreshService.instance.hasActive) {
         count += 1;
->>>>>>> Stashed changes
       }
     } catch (_) {
       // Badge is best-effort; ignore transient API errors.
@@ -227,13 +220,11 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
 
   int _geneProgressStep = 0;
 
-<<<<<<< Updated upstream
   PersonalizedAdviceBundle? _adviceBundle;
   bool _loadingAdvices = false;
-=======
+
   RecommendationRefreshService get _recService =>
       RecommendationRefreshService.instance;
->>>>>>> Stashed changes
 
   @override
   void initState() {
@@ -243,15 +234,7 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
     SelectedEnvironmentService.instance.addListener(_onEnvironmentSelection);
     _recService.addListener(_onRecommendationChanged);
     _loadEnvironmentFamily();
-<<<<<<< Updated upstream
-    _pollRecommendation();
     _loadPersonalizedAdvices();
-    _recommendationPoll = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _pollRecommendation(),
-    );
-=======
->>>>>>> Stashed changes
   }
 
   Future<void> _loadPersonalizedAdvices() async {
@@ -293,11 +276,8 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
   void _onSessionChanged() {
     if (mounted) {
       _loadEnvironmentFamily();
-<<<<<<< Updated upstream
-      _pollRecommendation();
       _loadPersonalizedAdvices();
-=======
->>>>>>> Stashed changes
+      _recService.requestImmediateRefresh();
     }
   }
 
@@ -659,7 +639,6 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
                       );
                       return;
                     }
-<<<<<<< Updated upstream
                     final key = advice.adviceKey;
                     if (key == null || key.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -680,18 +659,6 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
                       now.day,
                       startTime!.hour,
                       startTime!.minute,
-=======
-                    Navigator.of(ctx).pop();
-                    final hour = startTime!.hour;
-                    final minute = startTime!.minute;
-                    unawaited(
-                      _completeAdvice(
-                        adviceTitle: advice.title,
-                        startHour: hour,
-                        startMinute: minute,
-                        durationMinutes: minutes,
-                      ),
->>>>>>> Stashed changes
                     );
                     Navigator.of(ctx).pop();
                     try {
@@ -702,6 +669,7 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
                       );
                       if (!mounted) return;
                       SessionService.instance.notifyActivityChanged();
+                      _recService.requestImmediateRefresh();
                       final hh = startTime!.hour.toString().padLeft(2, '0');
                       final mm = startTime!.minute.toString().padLeft(2, '0');
                       ScaffoldMessenger.of(this.context).showSnackBar(
@@ -734,84 +702,6 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
     );
   }
 
-<<<<<<< Updated upstream
-=======
-  /// Records habit completion via `POST /behavior-logs` so streak API stays in sync.
-  Future<void> _completeAdvice({
-    required String adviceTitle,
-    required int startHour,
-    required int startMinute,
-    required int durationMinutes,
-  }) async {
-    final uid = SessionService.instance.user?['id'] as String?;
-    final envId = _selectedEnvironmentId;
-    if (uid == null || envId == null) return;
-
-    try {
-      final devices = await DeviceApi.listForEnvironment(
-        environmentId: envId,
-        userId: uid,
-      );
-      if (devices.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Add at least one device in Environments before logging activity.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-
-      final now = DateTime.now();
-      final eventTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        startHour,
-        startMinute,
-      );
-
-      final deviceId = int.parse(devices.first.id);
-
-      await BehaviorLogApi.create(
-        userId: uid,
-        deviceId: deviceId,
-        action: 'HabitCompleted',
-        eventTime: eventTime,
-        durationMinutes: durationMinutes,
-        parameters: jsonEncode(<String, dynamic>{
-          'habit_name': adviceTitle,
-          'source': 'dashboard_advice',
-        }),
-      );
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Logged $adviceTitle (${startHour.toString().padLeft(2, '0')}:${startMinute.toString().padLeft(2, '0')}, $durationMinutes min)',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      await _loadEnvironmentFamily();
-      RecommendationRefreshService.instance.requestImmediateRefresh();
-    } on UserApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
->>>>>>> Stashed changes
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
