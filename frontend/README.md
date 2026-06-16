@@ -74,10 +74,13 @@ Ana lint kuralları `analysis_options.yaml` üzerinden alınır.
   davranış loglarından beslenir; "Active Advices" listesi de kullanıcının
   `/habits` listesinden `is_active=true` olanlardan oluşur.
 
+## Öneri yenileme (Sprint E)
+
+- `RecommendationRefreshService` — 30 sn sabit + olay sonrası 3 sn burst (90 sn).
+- Tetikleyiciler: cihaz toggle, advice kaydı, uygulama resume, bildirim refresh.
+- `RecommendationApi.getActive()` artık `user_id` query göndermez; token yeterli.
+
 ## Bilinen sınırlar
 
-- Auth token tabanlı değildir (Sprint B'de eklenecek).
-- `dashboard_screen.dart` içindeki `env-demo-01` placeholder seçili
-  environment ile değiştirilecek (Sprint F).
-- Recommendation polling akışı şu an manuel; otomatik refresh Sprint F
-  kapsamında planlanıyor.
+- Demo “home tips” kartları `notifications_modal.dart` içinde hâlâ statik örneklerdir.
+- Inference veri üretmezse öneri banner’ı görünmeyebilir (normal).

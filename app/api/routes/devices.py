@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
 from app.api.deps import current_user_id
+<<<<<<< Updated upstream
 from app.api.schemas import DeviceCreate, DeviceUpdate
+=======
+from app.api.schemas import DeviceCreate, DevicePatch
+>>>>>>> Stashed changes
 from app.application.services import smart_home_service
 from app.core.models import Device
 from app.db.database import get_session
@@ -38,11 +42,40 @@ def create_device(
 @router.patch("/{device_id}", response_model=Device)
 def patch_device(
     device_id: int,
+<<<<<<< Updated upstream
     payload: DeviceUpdate,
     user_id: str = Depends(current_user_id),
     session: Session = Depends(get_session),
 ) -> Device:
     return smart_home_service.patch_device(device_id, user_id, payload, session)
+=======
+    payload: DevicePatch,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_session),
+) -> Device:
+    """
+    Sprint D: cihazı aç/kapa simülasyonu.
+
+    `status` güncellenir, `behavior_logs` kaydı oluşturulur ve inference arka planda çalışır.
+  """
+    if payload.status is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="status alani zorunlu (simulasyon icin).",
+        )
+    device, log = smart_home_service.set_device_status_authenticated(
+        device_id,
+        user_id,
+        payload.status,
+        session,
+        current_value=payload.current_value,
+    )
+    background_tasks.add_task(
+        smart_home_service.run_inference_for_behavior_log_background, log.id
+    )
+    return device
+>>>>>>> Stashed changes
 
 
 @router.delete("/{device_id}")

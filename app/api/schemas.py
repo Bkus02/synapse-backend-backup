@@ -109,6 +109,7 @@ class DeviceCreate(SQLModel):
     room: str | None = None
 
 
+<<<<<<< Updated upstream
 class DeviceUpdate(SQLModel):
     """Partial update; sadece gönderilen alanlar değişir."""
 
@@ -116,6 +117,13 @@ class DeviceUpdate(SQLModel):
     current_value: Decimal | None = None
     name: str | None = None
     room: str | None = None
+=======
+class DevicePatch(SQLModel):
+    """Sprint D: cihaz durumu değişimi (behavior log + inference tetikler)."""
+
+    status: bool | None = None
+    current_value: Decimal | None = None
+>>>>>>> Stashed changes
 
 
 class BehaviorLogCreate(SQLModel):

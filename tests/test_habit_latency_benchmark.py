@@ -151,13 +151,16 @@ def latency_comparison() -> dict[str, dict[str, float]]:
     return {"runtime": runtime, "matrix": matrix, "speedup_median_x": speedup}
 
 
+@pytest.mark.benchmark
 def test_runtime_mining_produces_candidates(latency_comparison: dict):
     assert latency_comparison["runtime"]["candidates"] >= 1
 
 
+@pytest.mark.benchmark
 def test_matrix_read_uses_matrix_source(latency_comparison: dict):
     assert latency_comparison["matrix"]["candidates"] >= 1
 
 
+@pytest.mark.benchmark
 def test_matrix_read_faster_than_runtime_mining(latency_comparison: dict):
     assert latency_comparison["matrix"]["median_ms"] < latency_comparison["runtime"]["median_ms"]

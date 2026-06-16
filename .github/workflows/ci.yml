@@ -36,7 +36,9 @@ jobs:
           # complain about the placeholder.
           JWT_SECRET_KEY: ci-test-secret-do-not-use-in-prod
           APP_ENV: test
-        run: pytest -q
+          CI: "true"
+        # Latency benchmarks are flaky on shared GitHub runners (timing ratios).
+        run: pytest -q -m "not benchmark"
 
   frontend:
     name: Frontend (Flutter analyze)
@@ -50,7 +52,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.x"
+          # pubspec.lock requires Dart >=3.10 / Flutter >=3.35 (see sdks: section).
           channel: stable
           cache: true
 

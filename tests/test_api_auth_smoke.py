@@ -114,6 +114,27 @@ def test_daily_activity_only_returns_own_log(client: TestClient) -> None:
     assert cross.status_code == 403
 
 
+def test_patch_user_requires_token(client: TestClient) -> None:
+    user = _register(client)
+    r = client.patch(f"/users/{user['id']}", json={"full_name": "Hacker"})
+    assert r.status_code == 401
+
+
+def test_list_users_requires_token(client: TestClient) -> None:
+    assert client.get("/users").status_code == 401
+
+
+def test_list_users_returns_only_self(client: TestClient) -> None:
+    user = _register(client)
+    token = _login(client, user["email"])["access_token"]
+    listed = client.get("/users", headers=_auth(token))
+    assert listed.status_code == 200
+    body = listed.json()
+    assert len(body) == 1
+    assert body[0]["id"] == user["id"]
+    assert "password_hash" not in body[0]
+
+
 def test_environment_admin_assigned_from_token(client: TestClient) -> None:
     alice = _register(client)
     auth = _auth(_login(client, alice["email"])["access_token"])

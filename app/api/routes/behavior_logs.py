@@ -1,5 +1,3 @@
-import logging
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
@@ -7,9 +5,7 @@ from app.api.deps import current_user_id
 from app.api.schemas import BehaviorLogCreate, HabitSequenceResponse
 from app.application.services import smart_home_service
 from app.core.models import BehaviorLog, Device
-from app.db.database import engine, get_session
-
-logger = logging.getLogger(__name__)
+from app.db.database import get_session
 
 router = APIRouter(prefix="/behavior-logs", tags=["BehaviorLogs"])
 
@@ -41,7 +37,9 @@ def create_behavior_log(
     smart_home_service.require_environment_access(user_id, device.environment_id, session)
 
     log = smart_home_service.create_behavior_log(payload, session)
-    background_tasks.add_task(_run_inference_and_notify, log.id)
+    background_tasks.add_task(
+        smart_home_service.run_inference_for_behavior_log_background, log.id
+    )
     return log
 
 
@@ -86,10 +84,3 @@ def rebuild_habit_matrix(
     return smart_home_service.rebuild_habit_matrix(session)
 
 
-def _run_inference_and_notify(log_id: int | None) -> None:
-    if log_id is None:
-        return
-    with Session(engine) as task_session:
-        decision = smart_home_service.run_inference_for_behavior_log(log_id, task_session)
-        if decision:
-            logger.info("AI önerisi hazırlandı: %s", decision.get("message"))

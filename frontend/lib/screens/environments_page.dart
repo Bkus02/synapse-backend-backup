@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 import '../models/environment_summary.dart';
+import '../services/device_refresh_bus.dart';
 import '../services/environment_api.dart';
 import '../services/selected_environment_service.dart';
 import '../services/session_service.dart';
@@ -14,11 +15,15 @@ class EnvironmentsPage extends StatefulWidget {
     super.key,
     this.pendingOpenEnvironmentId,
     this.onPendingOpenConsumed,
+    this.isTabActive = false,
   });
 
   /// When set (e.g. from notification → Environments tab), opens this environment’s detail.
   final String? pendingOpenEnvironmentId;
   final VoidCallback? onPendingOpenConsumed;
+
+  /// Bottom nav: Environments sekmesi görünürken true (cihaz listesi yenilenir).
+  final bool isTabActive;
 
   @override
   State<EnvironmentsPage> createState() => _EnvironmentsPageState();
@@ -87,6 +92,9 @@ class _EnvironmentsPageState extends State<EnvironmentsPage> {
   @override
   void didUpdateWidget(covariant EnvironmentsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.isTabActive && !oldWidget.isTabActive) {
+      DeviceRefreshBus.instance.notify();
+    }
     if (widget.pendingOpenEnvironmentId !=
         oldWidget.pendingOpenEnvironmentId) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

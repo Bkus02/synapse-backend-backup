@@ -61,6 +61,7 @@ class DeviceApi {
     throw UserApiException(UserApi.errorMessageFromResponse(response));
   }
 
+<<<<<<< Updated upstream
   /// PATCH `/devices/{id}` — partial update; sadece verilen alanlar gönderilir.
   static Future<EnvironmentDevice> patch({
     required int deviceId,
@@ -80,6 +81,17 @@ class DeviceApi {
       uri,
       headers: _headers,
       body: jsonEncode(body),
+=======
+  static Future<EnvironmentDevice> setStatus({
+    required int deviceId,
+    required bool status,
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/devices/$deviceId');
+    final response = await http.patch(
+      uri,
+      headers: _headers,
+      body: jsonEncode(<String, dynamic>{'status': status}),
+>>>>>>> Stashed changes
     );
     if (response.statusCode == 200) {
       return EnvironmentDevice.fromJson(

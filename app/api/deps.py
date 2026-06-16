@@ -95,8 +95,7 @@ def resolve_effective_user_id(
     - Token yoksa: requested varsa onu kullan (geri uyum).
     - İkisi de yoksa: 401.
 
-    Sprint B'de yalnızca seçilmiş hassas route'larda kullanılır; Sprint F'de
-    tüm route'lara yayılacaktır.
+    Sprint B/F route'larında token + opsiyonel query `user_id` eşlemesi için.
     """
     if token_user_id:
         if requested_user_id and requested_user_id != token_user_id:

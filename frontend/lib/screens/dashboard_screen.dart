@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -8,6 +9,9 @@ import '../models/daily_activity.dart';
 import '../models/environment_summary.dart';
 import '../models/habit.dart';
 import '../models/recommendation.dart' as api;
+import '../services/behavior_log_api.dart';
+import '../services/device_api.dart';
+import '../services/device_refresh_bus.dart';
 import '../services/environment_api.dart';
 import '../services/environment_streak_api.dart';
 import '../services/habit_api.dart';
@@ -15,6 +19,7 @@ import '../services/join_request_inbox.dart';
 import '../services/notification_api.dart';
 import '../services/personalized_advice_api.dart';
 import '../services/recommendation_api.dart';
+import '../services/recommendation_refresh_service.dart';
 import '../services/selected_environment_service.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
@@ -67,12 +72,14 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     SessionService.instance.addListener(_onSessionChanged);
+    RecommendationRefreshService.instance.addListener(_onRecommendationChanged);
     _refreshNotificationBadge();
   }
 
   @override
   void dispose() {
     SessionService.instance.removeListener(_onSessionChanged);
+    RecommendationRefreshService.instance.removeListener(_onRecommendationChanged);
     super.dispose();
   }
 
@@ -80,12 +87,21 @@ class _DashboardPageState extends State<DashboardPage> {
     _refreshNotificationBadge();
   }
 
+  void _onRecommendationChanged() {
+    _refreshNotificationBadge();
+  }
+
   Future<void> _refreshNotificationBadge() async {
     var count = 0;
     try {
       count += await JoinRequestInbox.pendingCountForAdmin();
+<<<<<<< Updated upstream
       if (SessionService.instance.hasToken) {
         count += await NotificationApi.badge();
+=======
+      if (RecommendationRefreshService.instance.hasActive) {
+        count += 1;
+>>>>>>> Stashed changes
       }
     } catch (_) {
       // Badge is best-effort; ignore transient API errors.
@@ -148,6 +164,7 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           const MainPage(),
           EnvironmentsPage(
+            isTabActive: _selectedIndex == 1,
             pendingOpenEnvironmentId: _pendingOpenEnvironmentId,
             onPendingOpenConsumed: () {
               setState(() => _pendingOpenEnvironmentId = null);
@@ -165,6 +182,7 @@ class _DashboardPageState extends State<DashboardPage> {
           setState(() => _selectedIndex = index);
           if (index == 1) {
             _refreshNotificationBadge();
+            DeviceRefreshBus.instance.notify();
           }
         },
         items: const [
@@ -193,7 +211,7 @@ class MainPage extends StatefulWidget {
   State<MainPage> createState() => _MainPageState();
 }
 
-class _MainPageState extends State<MainPage> {
+class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
   static const _daysToShow = 10;
 
   final List<_FamilyMemberProgress> _family = [];
@@ -205,28 +223,35 @@ class _MainPageState extends State<MainPage> {
 
   List<Habit> _activeHabits = const [];
 
-  api.Recommendation? _activeRecommendation;
-  bool _loadingRecommendation = false;
   bool _actingOnRecommendation = false;
-  Timer? _recommendationPoll;
 
   int _geneProgressStep = 0;
 
+<<<<<<< Updated upstream
   PersonalizedAdviceBundle? _adviceBundle;
   bool _loadingAdvices = false;
+=======
+  RecommendationRefreshService get _recService =>
+      RecommendationRefreshService.instance;
+>>>>>>> Stashed changes
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SessionService.instance.addListener(_onSessionChanged);
     SelectedEnvironmentService.instance.addListener(_onEnvironmentSelection);
+    _recService.addListener(_onRecommendationChanged);
     _loadEnvironmentFamily();
+<<<<<<< Updated upstream
     _pollRecommendation();
     _loadPersonalizedAdvices();
     _recommendationPoll = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _pollRecommendation(),
     );
+=======
+>>>>>>> Stashed changes
   }
 
   Future<void> _loadPersonalizedAdvices() async {
@@ -251,18 +276,33 @@ class _MainPageState extends State<MainPage> {
 
   @override
   void dispose() {
-    _recommendationPoll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     SessionService.instance.removeListener(_onSessionChanged);
     SelectedEnvironmentService.instance.removeListener(_onEnvironmentSelection);
+    _recService.removeListener(_onRecommendationChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _recService.requestImmediateRefresh();
+    }
   }
 
   void _onSessionChanged() {
     if (mounted) {
       _loadEnvironmentFamily();
+<<<<<<< Updated upstream
       _pollRecommendation();
       _loadPersonalizedAdvices();
+=======
+>>>>>>> Stashed changes
     }
+  }
+
+  void _onRecommendationChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onEnvironmentSelection() {
@@ -271,33 +311,8 @@ class _MainPageState extends State<MainPage> {
     }
   }
 
-  Future<void> _pollRecommendation() async {
-    final uid = SessionService.instance.user?['id'] as String?;
-    if (uid == null || !SessionService.instance.hasToken) {
-      if (mounted) {
-        setState(() {
-          _activeRecommendation = null;
-          _loadingRecommendation = false;
-        });
-      }
-      return;
-    }
-    if (mounted) setState(() => _loadingRecommendation = true);
-    try {
-      final rec = await RecommendationApi.getActive(userId: uid);
-      if (mounted) {
-        setState(() {
-          _activeRecommendation = rec;
-          _loadingRecommendation = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingRecommendation = false);
-    }
-  }
-
   Future<void> _respondToRecommendation(bool accept) async {
-    final rec = _activeRecommendation;
+    final rec = _recService.active;
     if (rec == null || _actingOnRecommendation) return;
     setState(() => _actingOnRecommendation = true);
     try {
@@ -313,8 +328,7 @@ class _MainPageState extends State<MainPage> {
             behavior: SnackBarBehavior.floating,
           ),
         );
-        setState(() => _activeRecommendation = null);
-        await _pollRecommendation();
+        _recService.invalidateAndRefresh();
       }
     } on UserApiException catch (e) {
       if (mounted) {
@@ -645,6 +659,7 @@ class _MainPageState extends State<MainPage> {
                       );
                       return;
                     }
+<<<<<<< Updated upstream
                     final key = advice.adviceKey;
                     if (key == null || key.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -665,6 +680,18 @@ class _MainPageState extends State<MainPage> {
                       now.day,
                       startTime!.hour,
                       startTime!.minute,
+=======
+                    Navigator.of(ctx).pop();
+                    final hour = startTime!.hour;
+                    final minute = startTime!.minute;
+                    unawaited(
+                      _completeAdvice(
+                        adviceTitle: advice.title,
+                        startHour: hour,
+                        startMinute: minute,
+                        durationMinutes: minutes,
+                      ),
+>>>>>>> Stashed changes
                     );
                     Navigator.of(ctx).pop();
                     try {
@@ -707,6 +734,84 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+<<<<<<< Updated upstream
+=======
+  /// Records habit completion via `POST /behavior-logs` so streak API stays in sync.
+  Future<void> _completeAdvice({
+    required String adviceTitle,
+    required int startHour,
+    required int startMinute,
+    required int durationMinutes,
+  }) async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    final envId = _selectedEnvironmentId;
+    if (uid == null || envId == null) return;
+
+    try {
+      final devices = await DeviceApi.listForEnvironment(
+        environmentId: envId,
+        userId: uid,
+      );
+      if (devices.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Add at least one device in Environments before logging activity.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      final now = DateTime.now();
+      final eventTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        startHour,
+        startMinute,
+      );
+
+      final deviceId = int.parse(devices.first.id);
+
+      await BehaviorLogApi.create(
+        userId: uid,
+        deviceId: deviceId,
+        action: 'HabitCompleted',
+        eventTime: eventTime,
+        durationMinutes: durationMinutes,
+        parameters: jsonEncode(<String, dynamic>{
+          'habit_name': adviceTitle,
+          'source': 'dashboard_advice',
+        }),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Logged $adviceTitle (${startHour.toString().padLeft(2, '0')}:${startMinute.toString().padLeft(2, '0')}, $durationMinutes min)',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await _loadEnvironmentFamily();
+      RecommendationRefreshService.instance.requestImmediateRefresh();
+    } on UserApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+>>>>>>> Stashed changes
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -773,15 +878,15 @@ class _MainPageState extends State<MainPage> {
                         ),
                       ),
                     ),
-                  if (_activeRecommendation != null) ...[
+                  if (_recService.active != null) ...[
                     _RecommendationBanner(
-                      recommendation: _activeRecommendation!,
+                      recommendation: _recService.active!,
                       busy: _actingOnRecommendation,
                       onAccept: () => _respondToRecommendation(true),
                       onReject: () => _respondToRecommendation(false),
                     ),
                     const SizedBox(height: 12),
-                  ] else if (_loadingRecommendation &&
+                  ] else if (_recService.loading &&
                       SessionService.instance.hasToken)
                     const Padding(
                       padding: EdgeInsets.only(bottom: 12),

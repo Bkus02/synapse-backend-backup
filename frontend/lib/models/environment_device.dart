@@ -72,6 +72,18 @@ extension EnvironmentDeviceTypeX on EnvironmentDeviceType {
       };
 }
 
+/// API / PostgreSQL bazen bool yerine 0/1 veya "true" döndürebilir.
+bool environmentDeviceBoolFromJson(dynamic value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final s = value.trim().toLowerCase();
+    if (s == 'true' || s == 'on' || s == '1') return true;
+    if (s == 'false' || s == 'off' || s == '0' || s.isEmpty) return false;
+  }
+  return false;
+}
+
 EnvironmentDeviceType environmentDeviceTypeFromApi(String raw) {
   switch (raw) {
     case 'Lamp':
@@ -169,7 +181,7 @@ class EnvironmentDevice {
       name: name,
       room: room,
       type: environmentDeviceTypeFromApi(typeStr),
-      status: json['status'] as bool? ?? false,
+      status: environmentDeviceBoolFromJson(json['status']),
       currentValue: current,
     );
   }

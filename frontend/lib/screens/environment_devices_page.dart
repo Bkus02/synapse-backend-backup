@@ -6,7 +6,9 @@ import '../models/environment_member.dart';
 import '../models/environment_summary.dart';
 import '../models/join_request.dart';
 import '../services/device_api.dart';
+import '../services/device_refresh_bus.dart';
 import '../services/environment_api.dart';
+import '../services/recommendation_refresh_service.dart';
 import '../services/session_service.dart';
 import '../services/tuya_lamp_api.dart';
 import '../services/user_api.dart';
@@ -30,6 +32,7 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
   List<EnvironmentDevice> _devices = [];
   bool _loadingDevices = true;
   String? _devicesError;
+  final Set<String> _togglingDeviceIds = {};
 
   List<EnvironmentMember> _members = [];
   List<JoinRequest> _joinRequests = [];
@@ -47,8 +50,54 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
   @override
   void initState() {
     super.initState();
+    DeviceRefreshBus.instance.subscribe(_loadDevices);
     _loadDevices();
     _loadPeople();
+  }
+
+  @override
+  void dispose() {
+    DeviceRefreshBus.instance.unsubscribe(_loadDevices);
+    super.dispose();
+  }
+
+  Future<void> _toggleDeviceStatus(EnvironmentDevice device, bool on) async {
+    final uid = SessionService.instance.user?['id'] as String?;
+    if (uid == null) return;
+    final deviceId = int.tryParse(device.id);
+    if (deviceId == null) return;
+
+    setState(() => _togglingDeviceIds.add(device.id));
+    try {
+      await DeviceApi.setStatus(deviceId: deviceId, status: on);
+      await _loadDevices();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${device.name} ${on ? "turned on" : "turned off"} — Synapse is learning.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        RecommendationRefreshService.instance.requestImmediateRefresh();
+      }
+    } on UserApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      await _loadDevices();
+    } finally {
+      if (mounted) {
+        setState(() => _togglingDeviceIds.remove(device.id));
+      }
+    }
   }
 
   Future<void> _loadDevices() async {
@@ -863,6 +912,7 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _DeviceCard(
                       device: device,
+<<<<<<< Updated upstream
                       accent: AppColors.accent,
                       cardColor: AppColors.surface,
                       onRemove: () => _confirmRemoveDevice(device),
@@ -873,6 +923,13 @@ class _EnvironmentDevicesPageState extends State<EnvironmentDevicesPage> {
                           : null,
                       onValueChanged: (value) =>
                           _onValueChange(device, value),
+=======
+                      accent: _accent,
+                      cardColor: _card,
+                      toggling: _togglingDeviceIds.contains(device.id),
+                      onRemove: () => _confirmRemoveDevice(device),
+                      onStatusChanged: (on) => _toggleDeviceStatus(device, on),
+>>>>>>> Stashed changes
                     ),
                   )),
               const SizedBox(height: 8),
@@ -889,6 +946,7 @@ class _DeviceCard extends StatefulWidget {
     required this.device,
     required this.accent,
     required this.cardColor,
+    required this.toggling,
     required this.onRemove,
     required this.onStatusChanged,
     required this.onValueChanged,
@@ -898,6 +956,7 @@ class _DeviceCard extends StatefulWidget {
   final EnvironmentDevice device;
   final Color accent;
   final Color cardColor;
+  final bool toggling;
   final VoidCallback onRemove;
   final ValueChanged<bool> onStatusChanged;
   final ValueChanged<double> onValueChanged;
@@ -1101,6 +1160,7 @@ class _DeviceCardState extends State<_DeviceCard> {
                   child: Center(
                     child: Switch.adaptive(
                       value: device.status,
+<<<<<<< Updated upstream
                       activeThumbColor: AppColors.textOnAccent,
                       activeTrackColor: widget.accent.withValues(alpha: 0.55),
                       inactiveThumbColor: AppColors.textSecondary,
@@ -1109,6 +1169,13 @@ class _DeviceCardState extends State<_DeviceCard> {
                         widget.onStatusChanged(on);
                         if (!on) _stopCountdown();
                       },
+=======
+                      activeThumbColor: Colors.white,
+                      activeTrackColor: accent.withValues(alpha: 0.55),
+                      inactiveThumbColor: Colors.white54,
+                      inactiveTrackColor: Colors.white24,
+                      onChanged: toggling ? null : onStatusChanged,
+>>>>>>> Stashed changes
                     ),
                   ),
                 ),

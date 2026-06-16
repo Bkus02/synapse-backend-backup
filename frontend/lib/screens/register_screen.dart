@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/session_service.dart';
 import '../services/user_api.dart';
 import '../theme/app_colors.dart';
 
@@ -59,25 +60,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
     FocusScope.of(context).unfocus();
 
     try {
+      final email = _emailController.text.trim();
+      final password = _passwordController.text;
       await UserApi.register(
         fullName: _fullNameController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+        email: email,
+        password: password,
         height: height,
         weight: weight,
         age: age,
         location: _selectedCity,
         gender: _selectedGender,
       );
+      final login = await UserApi.login(email: email, password: password);
+      await SessionService.instance.setSession(
+        user: login.user,
+        accessToken: login.accessToken,
+      );
       if (!mounted) return;
-      final email = _emailController.text.trim();
       Navigator.of(context).pushNamedAndRemoveUntil(
-        '/login',
+        '/dashboard',
         (route) => false,
-        arguments: <String, String>{
-          'email': email,
-          'snack': 'Account created. Please sign in.',
-        },
       );
     } on UserApiException catch (e) {
       if (!mounted) return;

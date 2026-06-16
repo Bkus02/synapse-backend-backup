@@ -3,7 +3,12 @@ import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 import '../services/environment_api.dart';
 import '../services/join_request_inbox.dart';
+<<<<<<< Updated upstream
 import '../services/notification_api.dart';
+=======
+import '../services/recommendation_api.dart';
+import '../services/recommendation_refresh_service.dart';
+>>>>>>> Stashed changes
 import '../services/session_service.dart';
 import '../services/user_api.dart';
 
@@ -82,11 +87,45 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
   List<JoinRequestInboxItem> _joinItems = [];
   bool _loadingJoin = true;
   String? _joinError;
+<<<<<<< Updated upstream
   final Set<int> _busyJoinIds = {};
+=======
+
+  bool _actingOnRecommendation = false;
+
+  RecommendationRefreshService get _recService =>
+      RecommendationRefreshService.instance;
+
+  final List<_TipEntry> _tips = [
+    _TipEntry(
+      icon: Icons.lightbulb,
+      title: 'Energy Saving Mode',
+      message:
+          'Living room lights were dimmed by 20% based on your habits.',
+      timeAgo: '2 min ago',
+    ),
+    _TipEntry(
+      icon: Icons.ac_unit,
+      title: 'Cooling Schedule',
+      message:
+          'AC was set to 22°C in the lounge based on your evening routine.',
+      timeAgo: '18 min ago',
+    ),
+    _TipEntry(
+      icon: Icons.lightbulb,
+      title: 'Bedroom Lights',
+      message: 'Bedroom lights were switched to night mode.',
+      timeAgo: '1 hr ago',
+    ),
+  ];
+
+  final Set<int> _busyRequestIds = {};
+>>>>>>> Stashed changes
 
   @override
   void initState() {
     super.initState();
+<<<<<<< Updated upstream
     _loadFeed();
     _loadJoin();
   }
@@ -142,6 +181,27 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
   Future<void> _confirmNotification(AppNotification n) async {
     if (_busyNotificationIds.contains(n.id)) return;
     setState(() => _busyNotificationIds.add(n.id));
+=======
+    _recService.addListener(_onRecommendationChanged);
+    _loadJoin();
+    _recService.requestImmediateRefresh();
+  }
+
+  @override
+  void dispose() {
+    _recService.removeListener(_onRecommendationChanged);
+    super.dispose();
+  }
+
+  void _onRecommendationChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _respondToRecommendation(bool accept) async {
+    final rec = _recService.active;
+    if (rec == null || _actingOnRecommendation) return;
+    setState(() => _actingOnRecommendation = true);
+>>>>>>> Stashed changes
     try {
       final updated = await NotificationApi.confirm(n.id);
       if (mounted) {
@@ -157,6 +217,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
             behavior: SnackBarBehavior.floating,
           ),
         );
+<<<<<<< Updated upstream
+=======
+        _recService.invalidateAndRefresh();
+>>>>>>> Stashed changes
       }
     } on UserApiException catch (e) {
       if (mounted) {
@@ -431,6 +495,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           onPressed: () {
                             _loadFeed();
                             _loadJoin();
+<<<<<<< Updated upstream
+=======
+                            _recService.requestImmediateRefresh();
+>>>>>>> Stashed changes
                           },
                           icon: const Icon(Icons.refresh_rounded),
                           color: widget.accent,
@@ -443,14 +511,37 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     child: ListView(
                       padding: const EdgeInsets.only(bottom: 24),
                       children: [
+<<<<<<< Updated upstream
                         if (_loadingFeed)
+=======
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Text(
+                            'Synapse suggestions',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (_recService.loading &&
+                            SessionService.instance.hasToken)
+>>>>>>> Stashed changes
                           const Padding(
                             padding: EdgeInsets.all(20),
                             child: Center(
                               child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
+<<<<<<< Updated upstream
                         else if (_feedError != null)
+=======
+                        else if (_recService.active == null)
+>>>>>>> Stashed changes
                           Padding(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                             child: Text(
@@ -490,12 +581,94 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                       fontWeight: FontWeight.w700,
                                     ),
                               ),
+<<<<<<< Updated upstream
                             );
                             for (final n in grouped[s]!) {
                               yield _notificationCard(n);
                             }
                           }),
                         const SizedBox(height: 14),
+=======
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.auto_awesome,
+                                          color: widget.accent,
+                                          size: 26,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            _recService.active!.headline,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _recService.active!.body,
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.72),
+                                        fontSize: 14,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: _actingOnRecommendation
+                                                ? null
+                                                : () => _respondToRecommendation(false),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.white70,
+                                              side: const BorderSide(
+                                                color: Colors.white24,
+                                              ),
+                                            ),
+                                            child: const Text('Dismiss'),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: FilledButton(
+                                            onPressed: _actingOnRecommendation
+                                                ? null
+                                                : () => _respondToRecommendation(true),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: widget.accent,
+                                            ),
+                                            child: _actingOnRecommendation
+                                                ? const SizedBox(
+                                                    height: 18,
+                                                    width: 18,
+                                                    child: CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: Colors.white,
+                                                    ),
+                                                  )
+                                                : const Text('Accept'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+>>>>>>> Stashed changes
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Text(

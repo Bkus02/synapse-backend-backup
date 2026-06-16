@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/auth_api.dart';
 import '../services/session_service.dart';
 import '../services/user_api.dart';
 import '../theme/app_colors.dart';
@@ -35,17 +36,32 @@ class _LoginPageState extends State<LoginPage> {
     _emailCtrl = TextEditingController(text: pre ?? '');
     _passwordCtrl = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final msg = widget.initialSnack;
-      if (msg != null && msg.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(msg),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      _maybeResumeSession();
     });
+  }
+
+  Future<void> _maybeResumeSession() async {
+    if (!mounted) return;
+    final msg = widget.initialSnack;
+    if (msg != null && msg.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+    if (!SessionService.instance.hasToken) return;
+    try {
+      final me = await AuthApi.fetchMe();
+      await SessionService.instance.setUser(me);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed('/dashboard');
+    } on UserApiException {
+      await SessionService.instance.clear();
+    } catch (_) {
+      // Backend kapalıysa login ekranında kal.
+    }
   }
 
   @override

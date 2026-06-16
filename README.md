@@ -34,6 +34,7 @@ mining, cold‑start (peer‑profil) motoru ve anomali tespiti vardır. Mobil is
 - [Docker (compose)](#docker-compose)
 - [Continuous Integration](#continuous-integration)
 - [Test](#test)
+- [Uçtan uca test (E2E)](#uçtan-uca-test-e2e)
 - [Frontend (Flutter)](#frontend-flutter)
 - [Analitik araçlar](#analitik-araçlar)
 - [Operasyonel komutlar](#operasyonel-komutlar)
@@ -156,7 +157,8 @@ Açılışta:
 > **Auth durumu (Sprint B sonrası):**
 > - Parolalar bcrypt ile hashlenir; `/auth/login` JWT access token döndürür.
 > - `GET /auth/me` token doğrulama uç noktasıdır.
-> - `PATCH /users/{id}` token gönderiliyorsa yalnız kendi profili güncellenir.
+> - `PATCH /users/{id}` ve `GET /users` **Bearer token zorunlu** (yalnız kendi kaydın).
+>   Profil okuma için `GET /auth/me` tercih edilir.
 > - **Sprint F (tam):** Aşağıdaki route'larda **Bearer token zorunludur**:
 >   `/habits`, `/devices`, `/environments` (write/list), `/behavior-logs`,
 >   `/recommendations`. `user_id` query parametresi artık token'dan okunur;
@@ -164,6 +166,11 @@ Açılışta:
 > - `GET /users/{id}/daily-activity?days=N`: kullanıcının son N gününde
 >   BehaviorLog bulunduğu günlerin listesi (dashboard streak için).
 >   Sahiplik kontrolü: yalnız kendi log'unu okuyabilirsiniz.
+> - **Sprint D:** `PATCH /devices/{id}` ile `status` güncellenir; `TurnOn`/`TurnOff`
+>   behavior log yazılır ve inference arka planda çalışır. Ayrıntı: `docs/SPRINT_D.md`.
+> - **Sprint E:** `GET /recommendations/active` yalnız Bearer ile; Flutter
+>   `RecommendationRefreshService` 30 sn polling + olay sonrası 3 sn burst.
+>   Ayrıntı: `docs/SPRINT_E.md`.
 >
 > **Migration uyarısı:** Sprint B öncesi PG'de düz metin parolayla kaydedilmiş
 > kullanıcılar artık login olamaz. Aşağıdaki SQL ile parolaları sıfırlayın
@@ -251,6 +258,19 @@ Rapor tablolarını yeniden üretmek için:
 ```powershell
 python -m tests.chapter6_report_tables
 ```
+
+## Uçtan uca test (E2E)
+
+Manuel adımlar (login → environment → cihaz → habit → streak): [`docs/E2E_TEST.md`](docs/E2E_TEST.md).
+
+Otomatik API akışı:
+
+```powershell
+pytest tests/test_e2e_api_flow.py -v
+```
+
+Dashboard’da bir tavsiyeyi **Save** ettiğinde frontend `POST /behavior-logs` gönderir;
+streak `GET /users/{id}/daily-activity` ile yenilenir. Ortamda en az bir cihaz gerekir.
 
 ## Frontend (Flutter)
 

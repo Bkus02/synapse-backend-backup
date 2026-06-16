@@ -13,9 +13,8 @@ class RecommendationApi {
   static Map<String, String> get _headers =>
       SessionService.instance.authHeaders();
 
-  static Future<Recommendation?> getActive({required String userId}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/recommendations/active')
-        .replace(queryParameters: <String, String>{'user_id': userId});
+  static Future<Recommendation?> getActive() async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/recommendations/active');
     final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       if (response.body.trim().isEmpty || response.body.trim() == 'null') {

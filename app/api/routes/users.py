@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session
 
-from app.api.deps import current_user_id, current_user_id_optional
+from app.api.deps import current_user, current_user_id
 from app.api.schemas import (
     DailyActivityDay,
     DailyActivityResponse,
     UserCreate,
+    UserPublic,
     UserUpdate,
 )
 from app.application.services import smart_home_service
@@ -20,9 +21,23 @@ from app.infrastructure.weather import get_current_weather, normalize_city
 router = APIRouter(prefix="/users", tags=["Users"])
 
 
-@router.get("", response_model=list[User])
-def list_users(session: Session = Depends(get_session)) -> list[User]:
-    return smart_home_service.list_users(session)
+@router.get("", response_model=list[UserPublic])
+def list_users(
+    user: User = Depends(current_user),
+) -> list[UserPublic]:
+    """Sprint B: token zorunlu; yalnızca oturum açmış kullanıcıyı döndürür. Tercih: GET /auth/me."""
+    return [
+        UserPublic(
+            id=user.id,
+            full_name=user.full_name,
+            email=user.email,
+            height=user.height,
+            weight=user.weight,
+            age=user.age,
+            location=user.location,
+            avatar_key=user.avatar_key,
+        )
+    ]
 
 
 @router.post("", response_model=User)
@@ -35,17 +50,11 @@ def create_user(payload: UserCreate, session: Session = Depends(get_session)) ->
 def patch_user(
     user_id: str,
     payload: UserUpdate,
+    token_user_id: str = Depends(current_user_id),
     session: Session = Depends(get_session),
-    token_user_id: str | None = Depends(current_user_id_optional),
 ) -> User:
-    """
-    Kullanıcıyı güncelle.
-
-    - Authorization header'da geçerli Bearer token varsa: yalnızca
-      kendi profilini güncelleyebilir; yol parametresi eşleşmezse 403.
-    - Token yoksa (Sprint F öncesi geri uyum): istek doğrudan uygulanır.
-    """
-    if token_user_id is not None and token_user_id != user_id:
+    """Sprint B: Bearer token zorunlu; yalnızca kendi profilinizi güncelleyebilirsiniz."""
+    if token_user_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Sadece kendi profilinizi guncelleyebilirsiniz.",

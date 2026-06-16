@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from datetime import UTC, date, datetime, timedelta
@@ -432,15 +433,31 @@ def delete_device_authenticated(device_id: int, user_id: str, session: Session) 
     return delete_device(device_id, session)
 
 
+<<<<<<< Updated upstream
 def patch_device(
     device_id: int, user_id: str, payload: DeviceUpdate, session: Session
 ) -> Device:
     """Partial update for a device — used for runtime controls like
     temperature, brightness and on/off state."""
+=======
+def set_device_status_authenticated(
+    device_id: int,
+    user_id: str,
+    status: bool,
+    session: Session,
+    *,
+    current_value: Decimal | None = None,
+) -> tuple[Device, BehaviorLog]:
+    """
+    Sprint D — akıllı cihaz simülasyonu: durumu günceller ve bir BehaviorLog yazar.
+    Inference arka planda route katmanında tetiklenir.
+    """
+>>>>>>> Stashed changes
     device = session.get(Device, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail="Device bulunamadi.")
     _require_environment_access(user_id, device.environment_id, session)
+<<<<<<< Updated upstream
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
         setattr(device, key, value)
@@ -448,6 +465,45 @@ def patch_device(
     _commit_or_400(session, "Device guncellenemedi.")
     session.refresh(device)
     return device
+=======
+
+    device.status = status
+    if current_value is not None:
+        device.current_value = current_value
+    session.add(device)
+    session.flush()
+
+    action = "TurnOn" if status else "TurnOff"
+    log = BehaviorLog(
+        user_id=user_id,
+        device_id=device_id,
+        action=action,
+        event_time=datetime.now(UTC),
+        parameters=json.dumps(
+            {
+                "source": "device_toggle",
+                "device_name": device.name or str(device.type.value),
+            }
+        ),
+    )
+    session.add(log)
+    _commit_or_400(session, "Cihaz durumu veya behavior log kaydedilemedi.")
+    session.refresh(device)
+    session.refresh(log)
+    return device, log
+
+
+def run_inference_for_behavior_log_background(log_id: int | None) -> None:
+    """BackgroundTasks icin: yeni session acip inference calistirir."""
+    if log_id is None:
+        return
+    from app.db.database import engine
+
+    with Session(engine) as task_session:
+        decision = run_inference_for_behavior_log(log_id, task_session)
+        if decision:
+            logger.info("AI onerisi (device toggle): %s", decision.get("message"))
+>>>>>>> Stashed changes
 
 
 def list_behavior_logs(session: Session) -> list[BehaviorLog]:
